@@ -22,12 +22,12 @@
 
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
-
+#include "usbd_custom_hid_if.h"
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
 /* USER CODE BEGIN PTD */
-
+static uint8_t dbg[64];
 /* USER CODE END PTD */
 
 /* Private define ------------------------------------------------------------*/
@@ -84,7 +84,14 @@ int main(void)
   SystemClock_Config();
 
   /* USER CODE BEGIN SysInit */
-
+  void App_Poll(void)
+  {
+      uint16_t n = sizeof(dbg);
+      while (XHC_RX_TryPop(dbg, &n)) {
+          /* Breakpoint hier – dbg[0] = ReportID (sollte 0x06 sein), dbg[1..7] Payload */
+          n = sizeof(dbg);
+      }
+  }
   /* USER CODE END SysInit */
 
   /* Initialize all configured peripherals */
@@ -100,7 +107,9 @@ int main(void)
   while (1)
   {
     /* USER CODE END WHILE */
+	  App_Poll();               // neue Feature-Reports aus dem Ringpuffer abholen
 
+	        HAL_Delay(1);             // optional: 1–2 ms, damit die CPU nicht 100% frisst
     /* USER CODE BEGIN 3 */
   }
   /* USER CODE END 3 */

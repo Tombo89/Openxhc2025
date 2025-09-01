@@ -22,7 +22,18 @@
 #include "usbd_custom_hid_if.h"
 
 /* USER CODE BEGIN INCLUDE */
+#include <string.h>
+#include "usb_device.h"
+#include "usbd_customhid.h"  // deklariert USBD_CUSTOM_HID_ReceivePacket()
+#include "usbd_core.h"
 
+#ifndef __USB_DEVICE__H
+extern USBD_HandleTypeDef hUsbDeviceFS;
+#endif
+
+#ifndef USBD_CUSTOMHID_OUTREPORT_BUF_SIZE
+#define USBD_CUSTOMHID_OUTREPORT_BUF_SIZE 64u
+#endif
 /* USER CODE END INCLUDE */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -31,7 +42,26 @@
 
 /* USER CODE BEGIN PV */
 /* Private variables ---------------------------------------------------------*/
+#define XHC_OUT_MAX_LEN   64u            // Größe eines Host->Device Reports
+#define XHC_RX_RING_SIZE  8u             // Anzahl gepufferter Reports (2..16)
+#define XHC_FEAT_MAX_LEN  USBD_CUSTOMHID_OUTREPORT_BUF_SIZE
 
+
+
+typedef struct {
+    uint16_t len;
+    uint8_t  data[XHC_OUT_MAX_LEN];
+} xhc_rx_item_t;
+
+static volatile uint16_t   rx_head = 0;     // schreibt der USB-IRQ
+static volatile uint16_t   rx_tail = 0;     // liest die Anwendung
+static volatile uint32_t   rx_dropped = 0;  // Statistik: überlaufene Pakete
+static xhc_rx_item_t       rx_ring[XHC_RX_RING_SIZE];
+
+/* Hilfs-Makros */
+#define RING_NEXT(i)  (uint16_t)(((i) + 1u) % XHC_RX_RING_SIZE)
+#define RING_EMPTY()  (rx_head == rx_tail)
+#define RING_FULL()   (RING_NEXT(rx_head) == rx_tail)
 /* USER CODE END PV */
 
 /** @addtogroup STM32_USB_OTG_DEVICE_LIBRARY
@@ -49,7 +79,45 @@
   */
 
 /* USER CODE BEGIN PRIVATE_TYPES */
+/* --------- API für Anwendung / Debug --------- */
 
+uint8_t XHC_RX_TryPop(uint8_t *dst, uint16_t *io_len)
+{
+    if (RING_EMPTY()) return 0;
+
+    uint16_t idx = rx_tail;
+    uint16_t n   = rx_ring[idx].len;
+
+    if (dst && io_len && *io_len >= n) {
+        memcpy(dst, rx_ring[idx].data, n);
+        *io_len = n;
+        rx_tail = RING_NEXT(rx_tail);
+        return 1;
+    }
+
+    if (io_len) {
+        *io_len = n;   // teilt dem Aufrufer mit, wie groß er sein muss
+    }
+    return 0;
+}
+
+uint32_t XHC_RX_Count(void){ return (rx_head>=rx_tail)? (rx_head-rx_tail):(XHC_RX_RING_SIZE-(rx_tail-rx_head)); }
+uint32_t XHC_RX_Dropped(void){ return rx_dropped; }
+
+/* Helper: OUT-EP nach Empfang wieder scharf schalten */
+static inline void XHC_Push_(const uint8_t *buf, uint16_t len)
+{
+    if (len > XHC_FEAT_MAX_LEN) len = XHC_FEAT_MAX_LEN;
+
+    if (!RING_FULL()) {
+        uint16_t idx = rx_head;
+        rx_ring[idx].len = len;
+        memcpy(rx_ring[idx].data, buf, len);
+        rx_head = RING_NEXT(rx_head);
+    } else {
+        rx_dropped++;
+    }
+}
 /* USER CODE END PRIVATE_TYPES */
 
 /**
@@ -197,6 +265,29 @@ static int8_t CUSTOM_HID_DeInit_FS(void)
 static int8_t CUSTOM_HID_OutEvent_FS(uint8_t event_idx, uint8_t state)
 {
   /* USER CODE BEGIN 6 */
+	(void)event_idx;
+	    (void)state;
+
+	    USBD_CUSTOM_HID_HandleTypeDef *hhid =
+	        (USBD_CUSTOM_HID_HandleTypeDef*)hUsbDeviceFS.pClassData;
+
+	    if (!hhid) {
+	        return (int8_t)USBD_OK;
+	    }
+
+	    /* In deinem Report-Descriptor ist:
+	         - Feature Report ID 0x06 mit 7 Bytes Payload => total 8 Byte inkl. ReportID
+	       Viele Stacks liefern in hhid->Report_buf genau diese 8 Byte.
+	       Falls mal mehr ankommt, caps durch XHC_FEAT_MAX_LEN. */
+	    uint16_t len = USBD_CUSTOMHID_OUTREPORT_BUF_SIZE;
+	    if (len > XHC_FEAT_MAX_LEN) len = XHC_FEAT_MAX_LEN;
+
+	    /* Optional: Wenn Report-ID 0x06 erzwungen werden soll, Länge hart auf 8 setzen */
+	    if (hhid->Report_buf[0] == 0x06) {
+	        len = (8u <= XHC_FEAT_MAX_LEN) ? 8u : XHC_FEAT_MAX_LEN;
+	    }
+
+	    XHC_Push_(hhid->Report_buf, len);
   return (USBD_OK);
   /* USER CODE END 6 */
 }
@@ -217,6 +308,8 @@ static int8_t USBD_CUSTOM_HID_SendReport_FS(uint8_t *report, uint16_t len)
 /* USER CODE END 7 */
 
 /* USER CODE BEGIN PRIVATE_FUNCTIONS_IMPLEMENTATION */
+
+
 
 /* USER CODE END PRIVATE_FUNCTIONS_IMPLEMENTATION */
 /**
