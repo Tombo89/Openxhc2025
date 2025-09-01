@@ -48,6 +48,13 @@
 #define UI_MIN_PERIOD_MS  120u   /* sanftes Rate-Limit für Updates */
 #define FRAME_HOLD_MS     600u   /* nach vollständigem Frame: Quelle kurz halten */
 
+/* Footer-Text-Startpunkte */
+#define FOOT_Y_A   (s_blue_y + 2)    /* obere Footer-Zeile */
+#define FOOT_Y_B   (s_blue_y + 14)   /* untere Footer-Zeile */
+#define FOOT_X_L   2                 /* linker Block */
+#define FOOT_X_R   84                /* rechter Block (ca. Mitte + etwas Rand) */
+
+
 /* ==== Frame-Struktur (gepackt) ==== */
 #pragma pack(push,1)
 typedef struct { uint16_t p_int; uint16_t p_frac; } xhc_pos_t;
@@ -184,11 +191,42 @@ static void Draw_Static_Layout_Once(void)
     PUT_STR(s_axis_x,  s_val_y[5], "Z:", FONT_LABEL, BLACK, WHITE);
 
     /* (Fußzeilen-Inhalte später) */
+
+
 }
 
 /* ==== Werte-Zeichnen mit minimalem Redraw (nur Änderungen) ==== */
 static char s_last_val[6][12];  /* 10 Zeichen + 0, etwas Reserve */
 static uint8_t s_last_len[6];   /* jeweils 10 */
+
+/* ==== Footer (blauer Streifen) – 4 Text-Slots: 0=F% 1=S% 2=F 3=S ==== */
+static char s_last_bot[4][16];     /* jeder Slot bis ~15 Zeichen */
+static uint8_t s_last_bot_len[4];
+
+
+static inline void DrawFooterText(uint8_t slot, uint16_t x, uint16_t y, const char* txt)
+{
+    if (slot > 3) return;
+    const char* old = s_last_bot[slot];
+    uint8_t oldlen  = s_last_bot_len[slot];
+
+    uint8_t len = (uint8_t)strlen(txt);
+    if (len > 15) len = 15;
+
+    /* diff-draw: Zeichenweise neu auf **blauem** Hintergrund mit **weißem** Text */
+    for (uint8_t i=0; i < ((oldlen > len) ? oldlen : len); ++i){
+        char nc = (i < len)    ? txt[i] : ' ';
+        char oc = (i < oldlen) ? old[i]  : ' ';
+        if (nc != oc){
+            char s[2] = { nc, 0 };
+            ST7735_WriteString((uint16_t)(x + i*CHAR_W), y, s, Font_7x10, WHITE, BLUE);
+        }
+    }
+    memcpy(s_last_bot[slot], txt, len);
+    s_last_bot[slot][len] = 0;
+    s_last_bot_len[slot] = len;
+}
+
 
 static void Draw_Value_Aligned(uint8_t idx /*0..5*/, const char* val10)
 {
@@ -234,9 +272,10 @@ static uint32_t t_last_draw  = 0;
 
 void RenderScreen_Init(void)
 {
-    /* statische Bühne leeren/setzen */
     memset(s_last_val, 0, sizeof(s_last_val));
     memset(s_last_len, 0, sizeof(s_last_len));
+    memset(s_last_bot, 0, sizeof(s_last_bot));
+    memset(s_last_bot_len, 0, sizeof(s_last_bot_len));
     s_static_drawn = 0;
     Draw_Static_Layout_Once();
 }
@@ -290,6 +329,31 @@ void RenderScreen(void)
             xhc2string_align10(f.pos[3].p_int, f.pos[3].p_frac, v[3]);  /* Xm */
             xhc2string_align10(f.pos[4].p_int, f.pos[4].p_frac, v[4]);  /* Ym */
             xhc2string_align10(f.pos[5].p_int, f.pos[5].p_frac, v[5]);  /* Zm */
+
+            /* ---- Footer: einfache Textwerte im blauen Balken ---- */
+
+                char fov[16], sov[16], fvl[16], svl[16];
+
+                    /* FEEDRATE-Override kommt in Zehntel-% (z. B. 1000 = 100%) */
+                    uint16_t fov_int = (uint16_t)((f.feedrate_ovr + 5u) / 10u);  // runden auf ganze %
+
+                    /* SPINDLE-Override ist bei dir bereits in % */
+                    uint16_t sov_int = f.sspeed_ovr;
+
+                    /* Strings bauen – hier wirklich die *integrierten* Werte verwenden */
+                    snprintf(fov, sizeof(fov), "F%%:%u", (unsigned)fov_int);
+                    snprintf(sov, sizeof(sov), "S%%:%u", (unsigned)sov_int);
+
+                    /* absolute Werte (Einheiten: meist mm/min und RPM) */
+                    snprintf(fvl, sizeof(fvl), "F:%u", (unsigned)f.feedrate);
+                    snprintf(svl, sizeof(svl), "S:%u", (unsigned)f.sspeed);
+
+                    /* Slots: 0=F% 1=S% 2=F 3=S  */
+                    DrawFooterText(0, FOOT_X_L, FOOT_Y_A, fov);
+                    DrawFooterText(1, FOOT_X_R, FOOT_Y_A, sov);
+                    DrawFooterText(2, FOOT_X_L, FOOT_Y_B, fvl);
+                    DrawFooterText(3, FOOT_X_R, FOOT_Y_B, svl);
+
 
             for (uint8_t i=0; i<6; ++i) Draw_Value_Aligned(i, v[i]);
 
