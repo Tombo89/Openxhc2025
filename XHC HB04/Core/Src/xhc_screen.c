@@ -56,8 +56,7 @@
 #define FOOT_X_R   84                /* rechter Block (ca. Mitte + etwas Rand) */
 
 /* Offsets im 37B-Frame (Little Endian) */
-#define OFF_FEED_OVR   27  /* uint16_t, Zehntel-% → /10 */
-#define OFF_SPIND_OVR  29  /* uint16_t, %          → direkt */
+
 #define OFF_FEED_VAL   31  /* uint16_t, mm/min (typisch) */
 #define OFF_SPIND_VAL  33  /* uint16_t, RPM (typisch) */
 
@@ -83,6 +82,8 @@
 #define S_LABEL_X   (COL1_X0)
 #define S_BAR_X     (S_LABEL_X + BAR_LABEL_W + BAR_PAD)
 #define S_BAR_W     (COL1_X1 - S_BAR_X)
+
+#define BAR_MIN_PERIOD_MS  40u
 
 /* Farben für Füllung */
 #ifndef RED
@@ -110,15 +111,10 @@
 #endif
 
 /* Offsets im 37-Byte-Frame (LE) – nur für die Overrides */
-#define OFF_FEED_OVR   27  /* uint16_t, Hundertstel-% */
-#define OFF_SPIND_OVR  29  /* uint16_t, % (bei dir)   */
+
+
 
 /* ---- forward declarations (needed before first use) ---- */
-static void DrawBarFrame(uint16_t x, uint16_t y, uint16_t w, uint16_t h);
-static void DrawBarValue(uint8_t which /*0=F,1=S*/,
-                         uint16_t x, uint16_t y, uint16_t w, uint16_t h,
-                         uint16_t pct, uint16_t minp, uint16_t maxp);
-
 static void DrawBarFrame(uint16_t x, uint16_t y, uint16_t w, uint16_t h);
 static void DrawBarValue(uint8_t which,
                          uint16_t x, uint16_t y, uint16_t w, uint16_t h,
@@ -321,6 +317,7 @@ static inline void DrawFooterText(uint8_t slot, uint16_t x, uint16_t y, const ch
 
 /* letzter angezeigter Prozentwert je Bar (zum Skippen unveränderter Frames) */
 static uint16_t s_last_bar_val[2] = { 0xFFFF, 0xFFFF };
+static uint32_t s_last_bar_t[2] = {0, 0};
 
 /* Rahmen einer Bar einmalig zeichnen (blauer Hintergrund ist schon da) */
 static void DrawBarFrame(uint16_t x, uint16_t y, uint16_t w, uint16_t h)
@@ -338,6 +335,13 @@ static void DrawBarValue(uint8_t which /*0=F,1=S*/,
                          uint16_t x, uint16_t y, uint16_t w, uint16_t h,
                          uint16_t pct, uint16_t minp, uint16_t maxp)
 {
+
+	uint32_t now = HAL_GetTick();
+	if ((now - s_last_bar_t[which]) < BAR_MIN_PERIOD_MS && pct != 100u) {
+	    return;   // zu früh, diesen Zwischenschritt überspringen
+	}
+
+
     if (pct == s_last_bar_val[which]) return;  /* nix zu tun */
 
     if (pct < minp) pct = minp;
@@ -353,16 +357,29 @@ static void DrawBarValue(uint8_t which /*0=F,1=S*/,
     /* Füllung einfärben: links <100% = ROT, rechts >100% = GRÜN */
     if (pct > 100u) {
         /* rechts: von cx nach rechts */
-        uint32_t span   = (uint32_t)(maxp - 100u);
-        uint32_t rel    = (uint32_t)(pct  - 100u);
-        uint16_t len_px = (span ? (uint16_t)((rel * (w/2u) + span/2u)/span) : 0u);
-        if (len_px) fillRect((int16_t)cx, (int16_t)(y+1), (int16_t)len_px, (int16_t)(h-2), GREEN);
+    	uint32_t span   = (uint32_t)(maxp - 100u);
+    	uint32_t rel    = (uint32_t)(pct  - 100u);
+    	uint16_t len_px = (span ? (uint16_t)((rel * (w/2u) + span/2u)/span) : 0u);
+    	/* >>> Clamp, damit nie bis in den Rahmen gemalt wird */
+    	uint16_t max_len = (uint16_t)(w/2u - 1u);
+    	if (len_px > max_len) len_px = max_len;
+
+    	if (len_px) {
+    	    fillRect((int16_t)cx, (int16_t)(y+1), (int16_t)len_px, (int16_t)(h-2), GREEN);
+    	}
     } else if (pct < 100u) {
         /* links: von cx-len nach links */
-        uint32_t span   = (uint32_t)(100u - minp);
-        uint32_t rel    = (uint32_t)(100u - pct);
-        uint16_t len_px = (span ? (uint16_t)((rel * (w/2u) + span/2u)/span) : 0u);
-        if (len_px) fillRect((int16_t)(cx - len_px), (int16_t)(y+1), (int16_t)len_px, (int16_t)(h-2), RED);
+    	uint32_t span   = (uint32_t)(100u - minp);
+    	uint32_t rel    = (uint32_t)(100u - pct);
+    	uint16_t len_px = (span ? (uint16_t)((rel * (w/2u) + span/2u)/span) : 0u);
+    	/* >>> Clamp wie oben */
+    	uint16_t max_len = (uint16_t)(w/2u - 1u);
+    	if (len_px > max_len) len_px = max_len;
+
+    	if (len_px) {
+    	    fillRect((int16_t)(cx - len_px), (int16_t)(y+1),
+    	             (int16_t)len_px, (int16_t)(h-2), RED);
+    	}
     }
 
     /* Prozenttext mittig (weiß auf blau) */
@@ -379,6 +396,7 @@ static void DrawBarValue(uint8_t which /*0=F,1=S*/,
     ST7735_WriteString(tx, ty, txt, Font_7x10, WHITE, BLUE);
 
     s_last_bar_val[which] = pct;
+    s_last_bar_t[which]   = now;
 }
 
 
