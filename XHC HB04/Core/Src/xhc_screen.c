@@ -54,6 +54,12 @@
 #define FOOT_X_L   2                 /* linker Block */
 #define FOOT_X_R   84                /* rechter Block (ca. Mitte + etwas Rand) */
 
+/* Offsets im 37B-Frame (Little Endian) */
+#define OFF_FEED_OVR   27  /* uint16_t, Zehntel-% → /10 */
+#define OFF_SPIND_OVR  29  /* uint16_t, %          → direkt */
+#define OFF_FEED_VAL   31  /* uint16_t, mm/min (typisch) */
+#define OFF_SPIND_VAL  33  /* uint16_t, RPM (typisch) */
+
 
 /* ==== Frame-Struktur (gepackt) ==== */
 #pragma pack(push,1)
@@ -207,24 +213,37 @@ static uint8_t s_last_bot_len[4];
 static inline void DrawFooterText(uint8_t slot, uint16_t x, uint16_t y, const char* txt)
 {
     if (slot > 3) return;
-    const char* old = s_last_bot[slot];
-    uint8_t oldlen  = s_last_bot_len[slot];
 
-    uint8_t len = (uint8_t)strlen(txt);
+    uint8_t oldlen = s_last_bot_len[slot];
+    uint8_t len    = (uint8_t)strlen(txt);
     if (len > 15) len = 15;
 
-    /* diff-draw: Zeichenweise neu auf **blauem** Hintergrund mit **weißem** Text */
-    for (uint8_t i=0; i < ((oldlen > len) ? oldlen : len); ++i){
-        char nc = (i < len)    ? txt[i] : ' ';
-        char oc = (i < oldlen) ? old[i]  : ' ';
+    /* 1) Gemeinsame Präfix-Länge diffbasiert (kein Clear nötig) */
+    uint8_t common = (oldlen < len) ? oldlen : len;
+    for (uint8_t i = 0; i < common; ++i){
+        char nc = txt[i], oc = s_last_bot[slot][i];
         if (nc != oc){
             char s[2] = { nc, 0 };
             ST7735_WriteString((uint16_t)(x + i*CHAR_W), y, s, Font_7x10, WHITE, BLUE);
         }
     }
+
+    /* 2) Neue zusätzliche Zeichen schreiben (falls länger geworden) */
+    for (uint8_t i = common; i < len; ++i){
+        char s[2] = { txt[i], 0 };
+        ST7735_WriteString((uint16_t)(x + i*CHAR_W), y, s, Font_7x10, WHITE, BLUE);
+    }
+
+    /* 3) Überhängende alte Zeichen entfernen (falls kürzer geworden) */
+    for (uint8_t i = len; i < oldlen; ++i){
+        /* Zelle gezielt löschen */
+        fillRect((uint16_t)(x + i*CHAR_W), y, CHAR_W, LINE_H, BLUE);
+    }
+
+    /* Cache aktualisieren */
     memcpy(s_last_bot[slot], txt, len);
     s_last_bot[slot][len] = 0;
-    s_last_bot_len[slot] = len;
+    s_last_bot_len[slot]  = len;
 }
 
 
@@ -332,27 +351,31 @@ void RenderScreen(void)
 
             /* ---- Footer: einfache Textwerte im blauen Balken ---- */
 
-                char fov[16], sov[16], fvl[16], svl[16];
+            char fov[16], sov[16], fvl[16], svl[16];
 
-                    /* FEEDRATE-Override kommt in Zehntel-% (z. B. 1000 = 100%) */
-                    uint16_t fov_int = (uint16_t)((f.feedrate_ovr + 5u) / 10u);  // runden auf ganze %
+                /* Rohwerte aus dem Frame puffersicher und endian-korrekt holen */
+                uint16_t feed_ovr_raw = (uint16_t)(frame_cache[OFF_FEED_OVR] | ((uint16_t)frame_cache[OFF_FEED_OVR+1] << 8));
+                uint16_t spin_ovr     = (uint16_t)(frame_cache[OFF_SPIND_OVR] | ((uint16_t)frame_cache[OFF_SPIND_OVR+1] << 8));
+                uint16_t feed_val     = (uint16_t)(frame_cache[OFF_FEED_VAL] | ((uint16_t)frame_cache[OFF_FEED_VAL+1] << 8));
+                uint16_t spin_val     = (uint16_t)(frame_cache[OFF_SPIND_VAL] | ((uint16_t)frame_cache[OFF_SPIND_VAL+1] << 8));
 
-                    /* SPINDLE-Override ist bei dir bereits in % */
-                    uint16_t sov_int = f.sspeed_ovr;
+                /* Feed-Override ist in Hundertstel-%, also /100 auf ganze % runden */
+                uint16_t fov_int = (uint16_t)((feed_ovr_raw + 50u) / 100u);
 
-                    /* Strings bauen – hier wirklich die *integrierten* Werte verwenden */
-                    snprintf(fov, sizeof(fov), "F%%:%u", (unsigned)fov_int);
-                    snprintf(sov, sizeof(sov), "S%%:%u", (unsigned)sov_int);
+                snprintf(fov, sizeof(fov), "F%%:%u", (unsigned)fov_int);
+                snprintf(sov, sizeof(sov), "S%%:%u", (unsigned)spin_ovr);
+                snprintf(fvl, sizeof(fvl), "F:%u",   (unsigned)feed_val);
+                snprintf(svl, sizeof(svl), "S:%u",   (unsigned)spin_val);
 
-                    /* absolute Werte (Einheiten: meist mm/min und RPM) */
-                    snprintf(fvl, sizeof(fvl), "F:%u", (unsigned)f.feedrate);
-                    snprintf(svl, sizeof(svl), "S:%u", (unsigned)f.sspeed);
+                DrawFooterText(0, FOOT_X_L, FOOT_Y_A, fov);
+                DrawFooterText(1, FOOT_X_R, FOOT_Y_A, sov);
+                DrawFooterText(2, FOOT_X_L, FOOT_Y_B, fvl);
+                DrawFooterText(3, FOOT_X_R, FOOT_Y_B, svl);
 
-                    /* Slots: 0=F% 1=S% 2=F 3=S  */
-                    DrawFooterText(0, FOOT_X_L, FOOT_Y_A, fov);
-                    DrawFooterText(1, FOOT_X_R, FOOT_Y_A, sov);
-                    DrawFooterText(2, FOOT_X_L, FOOT_Y_B, fvl);
-                    DrawFooterText(3, FOOT_X_R, FOOT_Y_B, svl);
+                /* Optionaler Kurz-Debug für 1–2 Läufe:
+                   snprintf(fov, sizeof(fov), "F%%:%u(%u)", (unsigned)fov_int, (unsigned)feed_ovr_raw);
+                   DrawFooterText(0, FOOT_X_L, FOOT_Y_A, fov);
+                */
 
 
             for (uint8_t i=0; i<6; ++i) Draw_Value_Aligned(i, v[i]);
