@@ -8,10 +8,36 @@
 #include <string.h>
 #include <stdint.h>
 #include "xhc_screen.h"
-#include "xhc_display.h"
 #include "xhc_format.h"
 #include "usbd_custom_hid_if.h"   // XHC_RX_TryPop
 #include "stm32f1xx_hal.h"
+
+/* Für das Zeichnen des Layouts */
+#include "ST7735.h"
+#include "GFX_FUNCTIONS.h"
+#include "fonts.h"   /* für Font_7x10 und deine reesansbold9pt7b */
+
+/* ==== Farb-/Display-Konstanten ==== */
+#ifndef WHITE
+#define WHITE 0xFFFF
+#endif
+#ifndef BLACK
+#define BLACK 0x0000
+#endif
+#ifndef BLUE
+#define BLUE  0x001F
+#endif
+
+
+#define FONT_LABEL Font_13x13
+
+/* Pixel-Geometrie für Font_7x10 bei den Werten */
+#define CHAR_W  7u
+#define LINE_H 12u
+
+/* Displaygröße (bei ST7735 oft 160x128 im Querformat) */
+#define LCD_W 160u
+#define LCD_H 128u
 
 /* ==== Protokoll-Konstanten ==== */
 #define XHC_FEAT_ID       0x06u
@@ -19,8 +45,8 @@
 #define XHC_FRAME_SIZE    37u
 #define XHC_MAGIC_LE      0xFDFE
 
-#define UI_MIN_PERIOD_MS  150u   /* max. ~6–7 Hz neu rendern */
-#define FRAME_HOLD_MS     700u   /* nach einem Frame kurz „Frame bevorzugen“ */
+#define UI_MIN_PERIOD_MS  120u   /* sanftes Rate-Limit für Updates */
+#define FRAME_HOLD_MS     600u   /* nach vollständigem Frame: Quelle kurz halten */
 
 /* ==== Frame-Struktur (gepackt) ==== */
 #pragma pack(push,1)
@@ -55,7 +81,7 @@ static void asm_feed7(const uint8_t *p7)
     asm_len += cp;
 }
 
-/* ==== Live 0x06 Dekoder (7-Segment → Text) ==== */
+/* ==== Live 0x06 Dekoder (7-Segment → ausgerichteter Text) ==== */
 static char seg7_to_char(uint8_t b){
     uint8_t s = b & 0x7F;
     switch(s){
@@ -66,25 +92,19 @@ static char seg7_to_char(uint8_t b){
     }
 }
 
-/* p7[0..6] = 7 Byte Payload; i. d. R. sind p7[1..6] die 6 Zeichen; MSB = Dezimalpunkt */
-static void feat06_to_text(const uint8_t *p7, char *out, uint16_t outsz)
+/* Live-Wert in genau 10 Zeichen normalisieren: "[-]xxxx.xxxx" (Dezimalpunkte fluchten) */
+static void feat06_to_text_align10(const uint8_t *p7, char *out, uint16_t outsz)
 {
     /* 7-Segment in Ziffern + Dezimalpunkt-Lage übersetzen */
     char digs[6]; uint8_t dp[6]={0}; uint8_t k=0, neg=0;
     for (int i=1; i<=6 && k<6; i++){
-        char c;
-        switch (p7[i] & 0x7F){
-            case 0x3F: c='0'; break; case 0x06: c='1'; break; case 0x5B: c='2'; break;
-            case 0x4F: c='3'; break; case 0x66: c='4'; break; case 0x6D: c='5'; break;
-            case 0x7D: c='6'; break; case 0x07: c='7'; break; case 0x7F: c='8'; break;
-            case 0x6F: c='9'; break; case 0x40: c='-'; break; default: c=' '; break;
-        }
+        char c = seg7_to_char(p7[i]);
         if (!neg && c=='-') { neg=1; continue; }
         digs[k] = c;
         dp[k] = (p7[i] & 0x80) ? 1 : 0;
         k++;
     }
-    /* int-/frac-Listen aufbauen anhand dp-Flags ('.' nach der Ziffer mit gesetztem dp) */
+    /* int-/frac-Listen anhand dp-Flags ('.' nach der Ziffer mit gesetztem dp) */
     char ibuf[6], fbuf[6]; int ilen=0, flen=0;
     uint8_t after_dot = 0;
     for (uint8_t i=0; i<k; i++){
@@ -98,16 +118,14 @@ static void feat06_to_text(const uint8_t *p7, char *out, uint16_t outsz)
     if (ilen == 0) { ibuf[ilen++]='0'; }
     /* auf 4 Integer- und 4 Fraction-Ziffern normalisieren */
     char i4[4], f4[4];
-    // Integer rechtsbündig
     for (int i=0; i<4; ++i){
         int src = ilen - 4 + i;
         i4[i] = (src >= 0) ? ibuf[src] : ' ';
     }
-    // Fraction auf 4, fehlende mit '0' auffüllen
     for (int i=0; i<4; ++i){
         f4[i] = (i < flen) ? fbuf[i] : '0';
     }
-    // Ausgabe exakt 10 Zeichen: S I I I I . F F F F
+    /* Ausgabe exakt 10 Zeichen: S I I I I . F F F F */
     int p=0;
     if (p < (int)outsz-1) out[p++] = neg ? '-' : ' ';
     for (int i=0; i<4 && p < (int)outsz-1; ++i) out[p++] = i4[i];
@@ -116,7 +134,92 @@ static void feat06_to_text(const uint8_t *p7, char *out, uint16_t outsz)
     out[p]=0;
 }
 
-/* ==== UI-State ==== */
+/* ==== UI-Layout (statisch) ==== */
+
+/* Y-Positionen der 6 Werte-Zeilen (in Pixel) */
+static const uint16_t s_val_y[6] = { 2, 14, 26, 50, 62, 74 };
+/* X-Start der Zahlen (möglichst bei vielfachem von 7, damit 10 Zeichen gut passen) */
+static const uint16_t s_val_x     = 64;  /* 9*7=63 → ~64 px ab linker Kante */
+
+/* Labels-Positionen */
+static const uint16_t s_wc_mc_x   = 2;
+static const uint16_t s_axis_x    = 35;  /* "X:" / "Y:" / "Z:" links von den Zahlen */
+
+/* Divider & Blue-Bar */
+static const uint16_t s_div_y     = 42;  /* dünner Strich zwischen WC/MC */
+static const uint16_t s_blue_y    = 96;  /* Start der blauen Fußzeile */
+
+/* Einmal-Flag für statischen Aufbau */
+static uint8_t s_static_drawn = 0;
+
+/* kleine Writer */
+static inline void PUT_STR(uint16_t x, uint16_t y, const char* s,
+                           const FontDef font, uint16_t fg, uint16_t bg)
+{
+    ST7735_WriteString(x, y, s, font, fg, bg);
+}
+
+/* statisches Layout genau einmal zeichnen */
+static void Draw_Static_Layout_Once(void)
+{
+    if (s_static_drawn) return;
+    s_static_drawn = 1;
+
+    /* Hintergrund + blaue Leiste unten */
+    fillScreen(WHITE);  // ggf. schon in main gemacht; auskommentiert, wenn unerwünscht
+    fillRect(0, s_blue_y, LCD_W, (uint16_t)(LCD_H - s_blue_y), BLUE);
+
+    /* WC/MC + Achsen-Labels */
+    PUT_STR(s_wc_mc_x, s_val_y[0], "WC", FONT_LABEL, BLACK, WHITE);
+    PUT_STR(s_axis_x,  s_val_y[0], "X:", FONT_LABEL, BLACK, WHITE);
+    PUT_STR(s_axis_x,  s_val_y[1], "Y:", FONT_LABEL, BLACK, WHITE);
+    PUT_STR(s_axis_x,  s_val_y[2], "Z:", FONT_LABEL, BLACK, WHITE);
+
+    /* Divider */
+    fillRect(0, s_div_y, LCD_W, 1, BLACK);
+
+    PUT_STR(s_wc_mc_x, s_val_y[3], "MC", FONT_LABEL, BLACK, WHITE);
+    PUT_STR(s_axis_x,  s_val_y[3], "X:", FONT_LABEL, BLACK, WHITE);
+    PUT_STR(s_axis_x,  s_val_y[4], "Y:", FONT_LABEL, BLACK, WHITE);
+    PUT_STR(s_axis_x,  s_val_y[5], "Z:", FONT_LABEL, BLACK, WHITE);
+
+    /* (Fußzeilen-Inhalte später) */
+}
+
+/* ==== Werte-Zeichnen mit minimalem Redraw (nur Änderungen) ==== */
+static char s_last_val[6][12];  /* 10 Zeichen + 0, etwas Reserve */
+static uint8_t s_last_len[6];   /* jeweils 10 */
+
+static void Draw_Value_Aligned(uint8_t idx /*0..5*/, const char* val10)
+{
+    if (idx > 5) return;
+
+    uint16_t x0 = s_val_x;
+    uint16_t y  = s_val_y[idx];
+
+    /* Vergleichen & nur differente Zeichen neu zeichnen */
+    const char* old = s_last_val[idx];
+    uint8_t oldlen  = s_last_len[idx];
+
+    uint8_t len = (uint8_t)strlen(val10);
+    if (len > 10) len = 10;
+
+    uint8_t maxlen = (oldlen > len) ? oldlen : len;
+    for (uint8_t i = 0; i < maxlen; ++i){
+        char nc = (i < len)    ? val10[i]    : ' ';
+        char oc = (i < oldlen) ? old[i]      : ' ';
+        if (nc != oc){
+            char s[2] = { nc, 0 };
+            ST7735_WriteString((uint16_t)(x0 + i*CHAR_W), y, s, Font_13x13, BLACK, WHITE);
+        }
+    }
+    /* Cache aktualisieren */
+    memcpy(s_last_val[idx], val10, len);
+    s_last_val[idx][len] = 0;
+    s_last_len[idx] = len;
+}
+
+/* ==== UI-State für Quelle/Timing ==== */
 static uint8_t  live_payload[7];
 static uint8_t  have_live = 0;
 
@@ -127,38 +230,21 @@ static uint32_t frame_t    = 0;
 static uint8_t  shown_source = 0; /* 0=nix, 1=LIVE, 2=FRAME */
 static uint32_t t_last_draw  = 0;
 
-/* eine Zeile „Lbl: <wert>“ kompakt ohne printf aufbauen (Signum via xhc2string) */
-static void one_val_line(const char* lbl, uint16_t i, uint16_t f, char *out, int outsz)
-{
-    char v[16];                        // 10 + '\0' reicht
-    xhc2string_align10(i, f, v);       // immer "[-]xxxx.xxxx"
-
-    int p = 0;
-    /* Label */
-    const char* s = lbl;
-    while (*s && p < outsz-1) out[p++] = *s++;
-    if (p < outsz-1) out[p++]=':';
-    if (p < outsz-1) out[p++]=' ';
-    /* Wert */
-    s = v;
-    while (*s && p < outsz-1) out[p++] = *s++;
-    out[p] = 0;
-}
+/* ===================== Public API ===================== */
 
 void RenderScreen_Init(void)
 {
-    XHC_Display_Init();
-    XHC_Display_SetHeader("HB04 ready");
-    XHC_Display_SetLine(1, "");
-    XHC_Display_SetLine(2, "");
-    XHC_Display_SetLine(3, "");
-    XHC_Display_SetLine(4, "");
-    XHC_Display_SetLine(5, "");
-    XHC_Display_SetLine(6, "");
+    /* statische Bühne leeren/setzen */
+    memset(s_last_val, 0, sizeof(s_last_val));
+    memset(s_last_len, 0, sizeof(s_last_len));
+    s_static_drawn = 0;
+    Draw_Static_Layout_Once();
 }
 
 void RenderScreen(void)
 {
+    Draw_Static_Layout_Once();
+
     /* 1) Reports einsammeln */
     uint8_t rx[64]; uint16_t n=sizeof(rx);
     while (XHC_RX_TryPop(rx, &n)) {
@@ -192,37 +278,20 @@ void RenderScreen(void)
         /* ===== FRAME (37B) ===== */
         whb04_out_data_t f; memcpy(&f, frame_cache, sizeof(f));
         if (f.magic != XHC_MAGIC_LE){
-            /* invalider Frame → auf Live wechseln, wenn vorhanden */
             if (!have_live) return;
-            want = 1;
+            want = 1;  /* auf Live umschalten */
         } else {
-            /* fester Header: "SRC:FRAME Day:NN" */
-            char head[32];
-            int p=0; const char *fix="SRC:FRAME Day:";
-            while (*fix && p<(int)sizeof(head)-1) head[p++]=*fix++;
-            unsigned d=f.day;
-            if (d>=100 && p<(int)sizeof(head)-1) head[p++]='0'+(d/100)%10;
-            if (d>=10  && p<(int)sizeof(head)-1) head[p++]='0'+(d/10)%10;
-            if (p<(int)sizeof(head)-1)          head[p++]='0'+(d%10);
-            head[p]=0;
+            char v[6][12];  /* 6 Werte je max 11 inkl. 0 */
 
-            char l1[48], l2[48], l3[48], l4[48], l5[48], l6[48];
+            /* exakt 10-stellig – Dezimalpunkte in einer Flucht */
+            xhc2string_align10(f.pos[0].p_int, f.pos[0].p_frac, v[0]);  /* Xw */
+            xhc2string_align10(f.pos[1].p_int, f.pos[1].p_frac, v[1]);  /* Yw */
+            xhc2string_align10(f.pos[2].p_int, f.pos[2].p_frac, v[2]);  /* Zw */
+            xhc2string_align10(f.pos[3].p_int, f.pos[3].p_frac, v[3]);  /* Xm */
+            xhc2string_align10(f.pos[4].p_int, f.pos[4].p_frac, v[4]);  /* Ym */
+            xhc2string_align10(f.pos[5].p_int, f.pos[5].p_frac, v[5]);  /* Zm */
 
-            /* Vertikal: Work dann Machine */
-            one_val_line("Xw", f.pos[0].p_int, f.pos[0].p_frac, l1, sizeof(l1));
-            one_val_line("Yw", f.pos[1].p_int, f.pos[1].p_frac, l2, sizeof(l2));
-            one_val_line("Zw", f.pos[2].p_int, f.pos[2].p_frac, l3, sizeof(l3));
-            one_val_line("Xm", f.pos[3].p_int, f.pos[3].p_frac, l4, sizeof(l4));
-            one_val_line("Ym", f.pos[4].p_int, f.pos[4].p_frac, l5, sizeof(l5));
-            one_val_line("Zm", f.pos[5].p_int, f.pos[5].p_frac, l6, sizeof(l6));
-
-            XHC_Display_SetHeader(head);
-            XHC_Display_SetLine(1, l1);
-            XHC_Display_SetLine(2, l2);
-            XHC_Display_SetLine(3, l3);
-            XHC_Display_SetLine(4, l4);
-            XHC_Display_SetLine(5, l5);
-            XHC_Display_SetLine(6, l6);
+            for (uint8_t i=0; i<6; ++i) Draw_Value_Aligned(i, v[i]);
 
             shown_source = 2; t_last_draw = now; return;
         }
@@ -230,17 +299,13 @@ void RenderScreen(void)
 
     /* ===== LIVE (0x06) ===== */
     if (want == 1){
-        char head[] = "SRC:LIVE";
-        char num[24]; feat06_to_text(live_payload, num, sizeof(num));
+        char num[16];
+        feat06_to_text_align10(live_payload, num, sizeof(num));
 
-        XHC_Display_SetHeader(head);
-        XHC_Display_SetLine(1, num);
-        XHC_Display_SetLine(2, "");
-        XHC_Display_SetLine(3, "");
-        XHC_Display_SetLine(4, "");
-        XHC_Display_SetLine(5, "");
-        XHC_Display_SetLine(6, "");
+        /* Zeige Live ersatzweise in der ersten Zeile (Xw) */
+        Draw_Value_Aligned(0, num);
 
+        /* die übrigen Zeilen werden nicht angerührt */
         shown_source = 1; t_last_draw = now; return;
     }
 }
