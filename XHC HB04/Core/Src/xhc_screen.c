@@ -7,6 +7,7 @@
 
 #include <string.h>
 #include <stdint.h>
+#include <stdio.h>
 #include "xhc_screen.h"
 #include "xhc_format.h"
 #include "usbd_custom_hid_if.h"   // XHC_RX_TryPop
@@ -59,6 +60,73 @@
 #define OFF_SPIND_OVR  29  /* uint16_t, %          → direkt */
 #define OFF_FEED_VAL   31  /* uint16_t, mm/min (typisch) */
 #define OFF_SPIND_VAL  33  /* uint16_t, RPM (typisch) */
+
+/* ---- zwei Spalten im Footer (nebeneinander) ---- */
+#define COL0_X0    2u
+#define COL0_X1   (LCD_W/2u - 2u)
+#define COL1_X0   (LCD_W/2u + 2u)
+#define COL1_X1   (LCD_W - 2u)
+
+/* eine gemeinsame Y-Position für beide Bars, oben bleibt Platz für Rotary/Step */
+#define BARS_Y    (s_blue_y + 16u)
+#define BAR_H     12u
+
+/* Labelbreite (ein Zeichen, Font_7x10) + kleiner Abstand vor der Bar */
+#define BAR_LABEL_W   (CHAR_W)
+#define BAR_PAD       3u
+
+/* abgeleitete Bar-Positionen/-Breiten */
+#define F_LABEL_X   (COL0_X0)
+#define F_BAR_X     (F_LABEL_X + BAR_LABEL_W + BAR_PAD)
+#define F_BAR_W     (COL0_X1 - F_BAR_X)
+
+#define S_LABEL_X   (COL1_X0)
+#define S_BAR_X     (S_LABEL_X + BAR_LABEL_W + BAR_PAD)
+#define S_BAR_W     (COL1_X1 - S_BAR_X)
+
+/* Farben für Füllung */
+#ifndef RED
+#define RED    0xF800
+#endif
+#ifndef GREEN
+#define GREEN  0x07E0
+#endif
+
+/* Falls doppelt vorhanden: nur EIN Offsets-Block behalten! */
+#ifndef OFF_FEED_OVR
+#define OFF_FEED_OVR   27  /* uint16_t, Hundertstel-% */
+#endif
+#ifndef OFF_SPIND_OVR
+#define OFF_SPIND_OVR  29  /* uint16_t, % */
+#endif
+
+
+/* Farben (du hast BLUE/WHITE/BLACK schon) */
+#ifndef CYAN
+#define CYAN  0x07FF
+#endif
+#ifndef YELLOW
+#define YELLOW 0xFFE0
+#endif
+
+/* Offsets im 37-Byte-Frame (LE) – nur für die Overrides */
+#define OFF_FEED_OVR   27  /* uint16_t, Hundertstel-% */
+#define OFF_SPIND_OVR  29  /* uint16_t, % (bei dir)   */
+
+/* ---- forward declarations (needed before first use) ---- */
+static void DrawBarFrame(uint16_t x, uint16_t y, uint16_t w, uint16_t h);
+static void DrawBarValue(uint8_t which /*0=F,1=S*/,
+                         uint16_t x, uint16_t y, uint16_t w, uint16_t h,
+                         uint16_t pct, uint16_t minp, uint16_t maxp);
+
+static void DrawBarFrame(uint16_t x, uint16_t y, uint16_t w, uint16_t h);
+static void DrawBarValue(uint8_t which,
+                         uint16_t x, uint16_t y, uint16_t w, uint16_t h,
+                         uint16_t pct, uint16_t minp, uint16_t maxp);
+
+static inline uint16_t rd16_le(const uint8_t *buf, uint8_t off) {
+    return (uint16_t)(buf[off] | ((uint16_t)buf[off+1] << 8));
+}
 
 
 /* ==== Frame-Struktur (gepackt) ==== */
@@ -172,6 +240,8 @@ static inline void PUT_STR(uint16_t x, uint16_t y, const char* s,
     ST7735_WriteString(x, y, s, font, fg, bg);
 }
 
+
+
 /* statisches Layout genau einmal zeichnen */
 static void Draw_Static_Layout_Once(void)
 {
@@ -196,9 +266,12 @@ static void Draw_Static_Layout_Once(void)
     PUT_STR(s_axis_x,  s_val_y[4], "Y:", FONT_LABEL, BLACK, WHITE);
     PUT_STR(s_axis_x,  s_val_y[5], "Z:", FONT_LABEL, BLACK, WHITE);
 
-    /* (Fußzeilen-Inhalte später) */
+    /* Progressbar-Labels + Rahmen (einmalig) */
+    ST7735_WriteString(F_LABEL_X, BARS_Y, "F", Font_7x10, WHITE, BLUE);
+    ST7735_WriteString(S_LABEL_X, BARS_Y, "S", Font_7x10, WHITE, BLUE);
 
-
+    DrawBarFrame(F_BAR_X, BARS_Y, F_BAR_W, BAR_H);
+    DrawBarFrame(S_BAR_X, BARS_Y, S_BAR_W, BAR_H);
 }
 
 /* ==== Werte-Zeichnen mit minimalem Redraw (nur Änderungen) ==== */
@@ -244,6 +317,68 @@ static inline void DrawFooterText(uint8_t slot, uint16_t x, uint16_t y, const ch
     memcpy(s_last_bot[slot], txt, len);
     s_last_bot[slot][len] = 0;
     s_last_bot_len[slot]  = len;
+}
+
+/* letzter angezeigter Prozentwert je Bar (zum Skippen unveränderter Frames) */
+static uint16_t s_last_bar_val[2] = { 0xFFFF, 0xFFFF };
+
+/* Rahmen einer Bar einmalig zeichnen (blauer Hintergrund ist schon da) */
+static void DrawBarFrame(uint16_t x, uint16_t y, uint16_t w, uint16_t h)
+{
+    /* Bar-Outline */
+    drawRect(x, y, w, h, WHITE);
+    /* Center-Marker (100%) */
+    uint16_t cx = (uint16_t)(x + w/2u);
+    drawFastVLine(cx, (int16_t)(y+1), (int16_t)(h-2), WHITE);
+}
+
+/* Bar-Inhalt neu zeichnen (nur bei Wertänderung).
+   min/max: Prozentbereiche (z.B. F:0..250, S:50..150) */
+static void DrawBarValue(uint8_t which /*0=F,1=S*/,
+                         uint16_t x, uint16_t y, uint16_t w, uint16_t h,
+                         uint16_t pct, uint16_t minp, uint16_t maxp)
+{
+    if (pct == s_last_bar_val[which]) return;  /* nix zu tun */
+
+    if (pct < minp) pct = minp;
+    if (pct > maxp) pct = maxp;
+
+    /* Innenraum wischen (Outline + Center stehen lassen) */
+    fillRect((int16_t)(x+1), (int16_t)(y+1), (int16_t)(w-2), (int16_t)(h-2), BLUE);
+
+    /* Center-Linie (100%) */
+    uint16_t cx = (uint16_t)(x + w/2u);
+    drawFastVLine((int16_t)cx, (int16_t)(y+1), (int16_t)(h-2), WHITE);
+
+    /* Füllung einfärben: links <100% = ROT, rechts >100% = GRÜN */
+    if (pct > 100u) {
+        /* rechts: von cx nach rechts */
+        uint32_t span   = (uint32_t)(maxp - 100u);
+        uint32_t rel    = (uint32_t)(pct  - 100u);
+        uint16_t len_px = (span ? (uint16_t)((rel * (w/2u) + span/2u)/span) : 0u);
+        if (len_px) fillRect((int16_t)cx, (int16_t)(y+1), (int16_t)len_px, (int16_t)(h-2), GREEN);
+    } else if (pct < 100u) {
+        /* links: von cx-len nach links */
+        uint32_t span   = (uint32_t)(100u - minp);
+        uint32_t rel    = (uint32_t)(100u - pct);
+        uint16_t len_px = (span ? (uint16_t)((rel * (w/2u) + span/2u)/span) : 0u);
+        if (len_px) fillRect((int16_t)(cx - len_px), (int16_t)(y+1), (int16_t)len_px, (int16_t)(h-2), RED);
+    }
+
+    /* Prozenttext mittig (weiß auf blau) */
+    char txt[8];
+    int n = snprintf(txt, sizeof(txt), "%u%%", (unsigned)pct);
+    if (n < 0) txt[0] = 0;
+
+    uint16_t tw = (uint16_t)(strlen(txt) * CHAR_W);
+    uint16_t tx = (uint16_t)(x + (w - tw)/2u);
+    uint16_t ty = (h > LINE_H) ? (uint16_t)(y + (h - LINE_H)/2u) : y;
+
+    /* Text-Hintergrund leicht „säubern“, dann Text zeichnen */
+    fillRect((int16_t)tx, (int16_t)ty, (int16_t)tw, (int16_t)LINE_H, BLUE);
+    ST7735_WriteString(tx, ty, txt, Font_7x10, WHITE, BLUE);
+
+    s_last_bar_val[which] = pct;
 }
 
 
@@ -350,32 +485,19 @@ void RenderScreen(void)
             xhc2string_align10(f.pos[5].p_int, f.pos[5].p_frac, v[5]);  /* Zm */
 
             /* ---- Footer: einfache Textwerte im blauen Balken ---- */
+            /* FEED: Hundertstel-% → auf ganze % runden und clampen 0..250 */
+            uint16_t feed_ovr_raw = rd16_le(frame_cache, OFF_FEED_OVR);
+            if (feed_ovr_raw > 25000u) feed_ovr_raw = 25000u;
+            uint16_t feed_pct = (uint16_t)((feed_ovr_raw + 50u) / 100u); /* 0..250 */
 
-            char fov[16], sov[16], fvl[16], svl[16];
+            /* SPINDLE: ganzzahlig in % → clampen 50..150 */
+            uint16_t spin_pct = rd16_le(frame_cache, OFF_SPIND_OVR);
+            if (spin_pct < 50u)  spin_pct = 50u;
+            if (spin_pct > 150u) spin_pct = 150u;
 
-                /* Rohwerte aus dem Frame puffersicher und endian-korrekt holen */
-                uint16_t feed_ovr_raw = (uint16_t)(frame_cache[OFF_FEED_OVR] | ((uint16_t)frame_cache[OFF_FEED_OVR+1] << 8));
-                uint16_t spin_ovr     = (uint16_t)(frame_cache[OFF_SPIND_OVR] | ((uint16_t)frame_cache[OFF_SPIND_OVR+1] << 8));
-                uint16_t feed_val     = (uint16_t)(frame_cache[OFF_FEED_VAL] | ((uint16_t)frame_cache[OFF_FEED_VAL+1] << 8));
-                uint16_t spin_val     = (uint16_t)(frame_cache[OFF_SPIND_VAL] | ((uint16_t)frame_cache[OFF_SPIND_VAL+1] << 8));
-
-                /* Feed-Override ist in Hundertstel-%, also /100 auf ganze % runden */
-                uint16_t fov_int = (uint16_t)((feed_ovr_raw + 50u) / 100u);
-
-                snprintf(fov, sizeof(fov), "F%%:%u", (unsigned)fov_int);
-                snprintf(sov, sizeof(sov), "S%%:%u", (unsigned)spin_ovr);
-                snprintf(fvl, sizeof(fvl), "F:%u",   (unsigned)feed_val);
-                snprintf(svl, sizeof(svl), "S:%u",   (unsigned)spin_val);
-
-                DrawFooterText(0, FOOT_X_L, FOOT_Y_A, fov);
-                DrawFooterText(1, FOOT_X_R, FOOT_Y_A, sov);
-                DrawFooterText(2, FOOT_X_L, FOOT_Y_B, fvl);
-                DrawFooterText(3, FOOT_X_R, FOOT_Y_B, svl);
-
-                /* Optionaler Kurz-Debug für 1–2 Läufe:
-                   snprintf(fov, sizeof(fov), "F%%:%u(%u)", (unsigned)fov_int, (unsigned)feed_ovr_raw);
-                   DrawFooterText(0, FOOT_X_L, FOOT_Y_A, fov);
-                */
+            /* 100% liegt jeweils in der Mitte */
+            DrawBarValue(0, F_BAR_X, BARS_Y, F_BAR_W, BAR_H, feed_pct,  0u, 250u);
+            DrawBarValue(1, S_BAR_X, BARS_Y, S_BAR_W, BAR_H, spin_pct, 50u, 150u);
 
 
             for (uint8_t i=0; i<6; ++i) Draw_Value_Aligned(i, v[i]);
