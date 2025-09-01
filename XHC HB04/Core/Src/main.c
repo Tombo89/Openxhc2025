@@ -20,9 +20,14 @@
 #include "main.h"
 #include "usb_device.h"
 
+
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
 #include "usbd_custom_hid_if.h"
+#include "GFX_FUNCTIONS.h"
+#include "ST7735.h"
+#include <stdint.h>
+
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -58,6 +63,55 @@ static void MX_SPI1_Init(void);
 /* Private user code ---------------------------------------------------------*/
 /* USER CODE BEGIN 0 */
 
+
+
+static inline char hexNib(uint8_t v)
+{
+    v &= 0x0F;
+    return (v < 10) ? ('0' + v) : ('A' + (v - 10));
+}
+
+static inline void bytes_to_hex(const uint8_t* in, uint16_t len, char* out, uint16_t outsz)
+{
+    uint16_t p = 0;
+    for (uint16_t i=0; i<len && (p+3) < outsz; i++){
+        out[p++] = hexNib(in[i] >> 4);
+        out[p++] = hexNib(in[i] & 0x0F);
+        if (i != len-1) out[p++] = ' ';
+    }
+    out[p] = '\0';
+}
+
+void App_Poll(void)
+{
+    uint8_t rx[64]; uint16_t n = sizeof(rx);
+    if (XHC_RX_TryPop(rx, &n)) {
+        char line[64];
+        // Kopfzeile: Länge + ID
+        char head[32];
+        uint8_t id = (n>0)? rx[0] : 0;
+        // "Len:xx ID:YY"
+        int p=0;
+        head[p++]='L'; head[p++]='e'; head[p++]='n'; head[p++]=':'; head[p++]=' ';
+        head[p++] = '0' + (n/10)%10; head[p++] = '0' + (n%10);
+        head[p++]=' '; head[p++]='I'; head[p++]='D'; head[p++]=':'; head[p++]=' ';
+        head[p++]=hexNib(id>>4); head[p++]=hexNib(id&0xF);
+        head[p]='\0';
+
+        ST7735_WriteString(0, 0, head,         Font_7x10, 0xFFFF, 0x0000);
+
+        // Zeile 1: max. 16 Bytes
+        uint16_t first = (n>16)?16:n;
+        bytes_to_hex(rx, first, line, sizeof(line));
+        ST7735_WriteString(0, 12, line,        Font_7x10, 0xFFFF, 0x0000);
+
+        // Zeile 2: Rest ab Byte 16 (optional)
+        if (n > first) {
+            bytes_to_hex(&rx[first], n-first, line, sizeof(line));
+            ST7735_WriteString(0, 24, line,    Font_7x10, 0xFFFF, 0x0000);
+        }
+    }
+}
 /* USER CODE END 0 */
 
 /**
@@ -84,14 +138,7 @@ int main(void)
   SystemClock_Config();
 
   /* USER CODE BEGIN SysInit */
-  void App_Poll(void)
-  {
-      uint16_t n = sizeof(dbg);
-      while (XHC_RX_TryPop(dbg, &n)) {
-          /* Breakpoint hier – dbg[0] = ReportID (sollte 0x06 sein), dbg[1..7] Payload */
-          n = sizeof(dbg);
-      }
-  }
+
   /* USER CODE END SysInit */
 
   /* Initialize all configured peripherals */
@@ -99,7 +146,9 @@ int main(void)
   MX_SPI1_Init();
   MX_USB_DEVICE_Init();
   /* USER CODE BEGIN 2 */
-
+  ST7735_Init(3);
+  fillScreen(WHITE);
+  //testAll();
   /* USER CODE END 2 */
 
   /* Infinite loop */

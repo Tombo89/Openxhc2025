@@ -2,7 +2,7 @@
 #define __ST7735_H__
 
 #include "fonts.h"
-#include "stm32f4xx_hal.h"
+#include "stm32f1xx_hal.h"
 #include <stdbool.h>
 
 
@@ -10,12 +10,12 @@ extern SPI_HandleTypeDef hspi1;
 #define ST7735_SPI_PORT hspi1
 
 /****** PIN DEFINES ******/
-#define CS_PORT GPIOB
-#define CS_PIN  GPIO_PIN_6
+#define CS_PORT GPIOA
+#define CS_PIN  GPIO_PIN_4
 #define DC_PORT GPIOA
-#define DC_PIN  GPIO_PIN_9
-#define RST_PORT GPIOC
-#define RST_PIN  GPIO_PIN_7
+#define DC_PIN  GPIO_PIN_3
+#define RST_PORT GPIOA
+#define RST_PIN  GPIO_PIN_2
 
 /****** TFT DEFINES ******/
 //#define ST7735_IS_160X80 1
