@@ -25,6 +25,9 @@
 /* USER CODE BEGIN Includes */
 #include <stdint.h>
 #include "xhc_screen.h"
+#include "xhc_display.h"
+#include "ST7735.h"
+#include "GFX_FUNCTIONS.h"
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/

@@ -22,5 +22,7 @@ void xhc2string(uint16_t iint, uint16_t ifrac, char ipadd, char fpadd, char *o);
 
 void int2strprec( int32_t v, char padd, char *o );
 
+void xhc2string_align10(uint16_t iint, uint16_t ifrac, char *out10);
+
 
 #endif /* INC_XHC_FORMAT_H_ */

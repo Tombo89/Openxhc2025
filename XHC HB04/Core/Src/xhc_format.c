@@ -90,36 +90,40 @@ void string2int( int32_t value, char padd, char *o )
 
 void xhc2string(uint16_t iint, uint16_t ifrac, char ipadd, char fpadd, char *o)
 {
-    char temp[24];   // Zwischenspeicher
-    char *s = temp;  char c = 0; char is_negative = 0;
+    /* Vorzeichen steckt im MSB von ifrac */
+    uint8_t neg = 0;
+    if (ifrac & 0x8000u) { neg = 1; ifrac &= 0x7FFFu; }
 
-    if (ifrac & 0x8000u){ is_negative = 1; ifrac &= ~0x8000u; }
+    /* Integerteil als String (ohne Vorzeichen) */
+    char buf_int[12];
+    int  int_len = 0;
+    uint32_t ii = iint;
+    do {
+        buf_int[int_len++] = (char)('0' + (ii % 10));
+        ii /= 10;
+    } while (ii && int_len < (int)sizeof(buf_int));
+    // reverse
+    for (int a=0, b=int_len-1; a<b; ++a, --b) { char t=buf_int[a]; buf_int[a]=buf_int[b]; buf_int[b]=t; }
+    buf_int[int_len] = '\0';
 
-    /* Nachkommastellen */
-    do { *s++ = (ifrac % 10) + '0'; ifrac /= 10; c++; } while (ifrac);
-    while (c < fpadd) { *s++ = '0'; c++; }
-    *s++ = '.';
+    /* Nachkommastellen exakt fpadd Ziffern */
+    if (fpadd < 0) fpadd = 0;
+    if (fpadd > 7) fpadd = 7;  // Sicherheitskappe
+    char buf_frac[8];
+    for (int i=fpadd-1; i>=0; --i) { buf_frac[i] = (char)('0' + (ifrac % 10)); ifrac /= 10; }
+    buf_frac[fpadd] = '\0';
 
-    /* Ganzzahlteil */
-    c = 0;
-    do { *s++ = (iint % 10) + '0'; iint /= 10; c++; } while (iint);
-    *s = 0;
+    /* Padding vor dem Vorzeichen/Zahl, um min. ipadd Integerbreite zu erreichen */
+    int pad_left = 0;
+    if (ipadd > int_len) pad_left = ipadd - int_len;
 
-    /* Umkehren */
-    char *start=temp, *end=s-1;
-    while (start < end){ char t=*start; *start++=*end; *end--=t; }
-
-    /* Längen & Padding */
-    uint8_t temp_len = 0; while (temp[temp_len]) temp_len++;
-    uint8_t total_len = ipadd + fpadd + 3;  // +3 für "- ", "."
-    uint8_t used_len  = temp_len + 2;       // +2 für "- " oder "  "
-    uint8_t padding   = (total_len > used_len) ? (total_len - used_len) : 0;
-
-    while (padding--) *o++ = ' ';
-    *o++ = is_negative ? '-' : ' ';
-    *o++ = ' ';
-    for (uint8_t i=0; temp[i]; i++) *o++ = temp[i];
-    *o = 0;
+    char *out = o;
+    while (pad_left-- > 0) *out++ = ' ';
+    if (neg) *out++ = '-';               // <- direkt vor die Zahl, keine Lücke danach
+    for (int i=0; i<int_len; ++i) *out++ = buf_int[i];
+    *out++ = '.';
+    for (int i=0; i<fpadd;  ++i) *out++ = buf_frac[i];
+    *out = '\0';
 }
 
 void int2strprec( int32_t v, char padd, char *o )
@@ -135,3 +139,53 @@ void int2strprec( int32_t v, char padd, char *o )
     *o++ = sign; *o = 0; strreverse( s, o-1 );
 }
 
+void xhc2string_align10(uint16_t iint, uint16_t ifrac, char *out10)
+{
+    /* Vorzeichen steckt im MSB von ifrac */
+    uint8_t neg = 0;
+    if (ifrac & 0x8000u) { neg = 1; ifrac &= 0x7FFFu; }
+
+    /* Integerteil (ohne Vorzeichen) in buf_int */
+    char buf_int[6];  // max 4 Ziffern + '\0'
+    int  int_len = 0;
+    uint32_t ii = iint;
+    do {
+        buf_int[int_len++] = (char)('0' + (ii % 10));
+        ii /= 10;
+    } while (ii && int_len < 5);
+    // reverse
+    for (int a=0, b=int_len-1; a<b; ++a, --b) { char t=buf_int[a]; buf_int[a]=buf_int[b]; buf_int[b]=t; }
+    buf_int[int_len] = '\0';
+
+    // Safety: wenn mehr als 4 Stellen nötig wären → "####"
+    if (int_len > 4) {
+        int_len = 4;
+        buf_int[0] = '#'; buf_int[1] = '#'; buf_int[2] = '#'; buf_int[3] = '#'; buf_int[4] = '\0';
+    }
+
+    /* Pre-Field vor dem Punkt: 5 Spalten (inkl. evtl. Minus) */
+    char pre[5];
+    for (int i=0;i<5;i++) pre[i] = ' ';
+
+    // Ziffern rechtsbündig in pre[ ] einfüllen
+    int pos = 4;
+    for (int d = int_len-1; d >= 0; --d) {
+        pre[pos--] = buf_int[d];
+    }
+    // Minus direkt vor die erste Ziffer (also genau an 'pos')
+    if (neg && pos >= 0) {
+        pre[pos] = '-';
+    }
+
+    /* Nachkomma: genau 4 Ziffern, führend mit Nullen */
+    char frac[4];
+    uint32_t fr = ifrac;
+    for (int i=3; i>=0; --i) { frac[i] = (char)('0' + (fr % 10)); fr /= 10; }
+
+    /* Ausgabe: pre[0..4] '.' frac[0..3]  → Länge = 10 */
+    char *o = out10;
+    for (int i=0;i<5;i++) *o++ = pre[i];
+    *o++ = '.';
+    for (int i=0;i<4;i++) *o++ = frac[i];
+    *o = '\0';
+}
