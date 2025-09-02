@@ -18,6 +18,8 @@
 #include "GFX_FUNCTIONS.h"
 #include "fonts.h"   /* für Font_7x10 und deine reesansbold9pt7b */
 
+#include "io_inputs.h"   // liefert io_rotary_read()
+
 /* ==== Farb-/Display-Konstanten ==== */
 #ifndef WHITE
 #define WHITE 0xFFFF
@@ -85,6 +87,10 @@
 
 #define BAR_MIN_PERIOD_MS  40u
 
+
+/* OFF erst anzeigen, wenn der Schalter so lange wirklich "offen" ist */
+#define ROT_OFF_DELAY_MS   120u
+
 /* Farben für Füllung */
 #ifndef RED
 #define RED    0xF800
@@ -141,6 +147,88 @@ typedef struct {
 /* ==== Assembler für 37B-Frame (Feature 0x06 in 7-Byte-Chunks) ==== */
 static uint8_t  asm_buf[XHC_FRAME_SIZE];
 static uint8_t  asm_len = 0;
+
+/* ===== POS: X/Y/Z/F/S/A (links oben im Footer) ===== */
+static char     s_pos_last[16];
+static uint8_t  s_pos_last_len = 0;
+
+static uint8_t  s_rot_last_raw = 0xFF;   /* zuletzt gelesener Rohcode */
+static uint32_t s_rot_off_t0    = 0;     /* Startzeitpunkt "OFF offen" */
+static uint8_t  s_rot_show_off  = 1;     /* wir starten mit OFF sichtbar */
+
+
+static void DrawPOS(const char* txt)
+{
+    uint8_t oldlen = s_pos_last_len;
+    uint8_t len    = (uint8_t)strlen(txt);
+    if (len > sizeof(s_pos_last)-1) len = sizeof(s_pos_last)-1;
+
+    /* gemeinsame Präfix-Zeichen aktualisieren */
+    uint8_t common = (oldlen < len) ? oldlen : len;
+    for (uint8_t i=0; i<common; ++i) {
+        if (txt[i] != s_pos_last[i]) {
+            char s[2] = { txt[i], 0 };
+            ST7735_WriteString((uint16_t)(POS_X + i*CHAR_W), POS_Y, s, Font_7x10, WHITE, BLUE);
+        }
+    }
+    /* zusätzliche neue Zeichen */
+    for (uint8_t i=common; i<len; ++i) {
+        char s[2] = { txt[i], 0 };
+        ST7735_WriteString((uint16_t)(POS_X + i*CHAR_W), POS_Y, s, Font_7x10, WHITE, BLUE);
+    }
+    /* überhängende alte löschen */
+    for (uint8_t i=len; i<oldlen; ++i) {
+        fillRect((uint16_t)(POS_X + i*CHAR_W), POS_Y, CHAR_W, LINE_H, BLUE);
+    }
+
+    memcpy(s_pos_last, txt, len);
+    s_pos_last[len] = 0;
+    s_pos_last_len  = len;
+}
+
+/* Rohcode → Buchstabe; 0 bedeutet OFF/kein Pin */
+static char RotaryCodeToLetter(uint8_t code)
+{
+    switch (code) {
+        case 0x11: return 'X';
+        case 0x12: return 'Y';
+        case 0x13: return 'Z';
+        case 0x14: return 'F'; /* Feedrate */
+        case 0x15: return 'S'; /* Spindle  */
+        case 0x18: return 'A'; /* A/Processing */
+        default:   return 0;   /* OFF */
+    }
+}
+
+/* OFF-Entprellung: OFF erst nach ROT_OFF_DELAY_MS zeigen */
+static void UpdatePOS_FromRotary(void)
+{
+    uint32_t now  = HAL_GetTick();
+    uint8_t  raw  = io_rotary_read();   /* kommt aus io_input.c */
+    char     lett = RotaryCodeToLetter(raw);
+
+    if (lett) {
+        /* gültige Position – sofort anzeigen */
+        char buf[16];  /* "POS: X" */
+        buf[0]='P'; buf[1]='O'; buf[2]='S'; buf[3]=':'; buf[4]=' '; buf[5]=lett; buf[6]=0;
+        DrawPOS(buf);
+
+        /* OFF-Status zurücksetzen */
+        s_rot_off_t0   = 0;
+        s_rot_show_off = 0;
+    } else {
+        /* OFF (kein Pin aktiv) – nur anzeigen, wenn stabil lange genug */
+        if (s_rot_off_t0 == 0) {
+            s_rot_off_t0 = now;   /* Start des OFF-Fensters */
+        }
+        if (!s_rot_show_off && (now - s_rot_off_t0) >= ROT_OFF_DELAY_MS) {
+            DrawPOS("POS: OFF");
+            s_rot_show_off = 1;
+        }
+    }
+
+    s_rot_last_raw = raw;
+}
 
 static inline void asm_reset(void){ asm_len = 0; }
 
@@ -228,6 +316,11 @@ static const uint16_t s_axis_x    = 35;  /* "X:" / "Y:" / "Z:" links von den Zah
 static const uint16_t s_div_y     = 42;  /* dünner Strich zwischen WC/MC */
 static const uint16_t s_blue_y    = 96;  /* Start der blauen Fußzeile */
 
+/* POS-Text links oben im blauen Balken */
+#define POS_X      2u
+#define POS_Y      (s_blue_y + 2u)
+
+
 /* Einmal-Flag für statischen Aufbau */
 static uint8_t s_static_drawn = 0;
 
@@ -270,6 +363,11 @@ static void Draw_Static_Layout_Once(void)
 
     DrawBarFrame(F_BAR_X, BARS_Y, F_BAR_W, BAR_H);
     DrawBarFrame(S_BAR_X, BARS_Y, S_BAR_W, BAR_H);
+
+    /* POS initial anzeigen */
+    DrawPOS("POS: OFF");
+    s_rot_show_off = 1;
+    s_rot_off_t0   = HAL_GetTick();
 }
 
 /* ==== Werte-Zeichnen mit minimalem Redraw (nur Änderungen) ==== */
@@ -508,6 +606,12 @@ void RenderScreen(void)
             DrawBarValue(0, F_BAR_X, BARS_Y, F_BAR_W, BAR_H, feed_pct,  0u, 250u);
             DrawBarValue(1, S_BAR_X, BARS_Y, S_BAR_W, BAR_H, spin_pct, 50u, 150u);
 
+            DrawBarValue(0, F_BAR_X, BARS_Y, F_BAR_W, BAR_H, feed_pct,  0u, 250u);
+            DrawBarValue(1, S_BAR_X, BARS_Y, S_BAR_W, BAR_H, spin_pct, 50u, 150u);
+
+            /* --- Rotary POS aktualisieren (mit OFF-Entprellung) --- */
+            UpdatePOS_FromRotary();
+
 
             for (uint8_t i=0; i<6; ++i) Draw_Value_Aligned(i, v[i]);
 
@@ -523,6 +627,7 @@ void RenderScreen(void)
         /* Zeige Live ersatzweise in der ersten Zeile (Xw) */
         Draw_Value_Aligned(0, num);
 
+        UpdatePOS_FromRotary();
         /* die übrigen Zeilen werden nicht angerührt */
         shown_source = 1; t_last_draw = now; return;
     }
