@@ -32,6 +32,25 @@
 #endif
 
 
+/* ==== UI-Layout (statisch) ==== */
+
+/* Y-Positionen der 6 Werte-Zeilen (in Pixel) */
+static const uint16_t s_val_y[6] = { 2, 14, 26, 50, 62, 74 };
+/* X-Start der Zahlen (möglichst bei vielfachem von 7, damit 10 Zeichen gut passen) */
+static const uint16_t s_val_x     = 64;  /* 9*7=63 → ~64 px ab linker Kante */
+
+/* Labels-Positionen */
+static const uint16_t s_wc_mc_x   = 2;
+static const uint16_t s_axis_x    = 35;  /* "X:" / "Y:" / "Z:" links von den Zahlen */
+
+/* Divider & Blue-Bar */
+static const uint16_t s_div_y     = 42;  /* dünner Strich zwischen WC/MC */
+static const uint16_t s_blue_y    = 96;  /* Start der blauen Fußzeile */
+
+/* Einmal-Flag für statischen Aufbau */
+static uint8_t s_static_drawn = 0;
+
+
 #define FONT_LABEL Font_13x13
 
 /* Pixel-Geometrie für Font_7x10 bei den Werten */
@@ -207,7 +226,7 @@ static char RotaryCodeToLetter(uint8_t code)
 static void UpdatePOS_FromRotary(void)
 {
     uint32_t now  = HAL_GetTick();
-    uint8_t  raw  = io_rotary_read();   /* kommt aus io_input.c */
+    uint8_t  raw  = rotary_read();   /* kommt aus io_input.c */
     char     lett = RotaryCodeToLetter(raw);
 
     if (lett) {
@@ -304,23 +323,7 @@ static void feat06_to_text_align10(const uint8_t *p7, char *out, uint16_t outsz)
     out[p]=0;
 }
 
-/* ==== UI-Layout (statisch) ==== */
 
-/* Y-Positionen der 6 Werte-Zeilen (in Pixel) */
-static const uint16_t s_val_y[6] = { 2, 14, 26, 50, 62, 74 };
-/* X-Start der Zahlen (möglichst bei vielfachem von 7, damit 10 Zeichen gut passen) */
-static const uint16_t s_val_x     = 64;  /* 9*7=63 → ~64 px ab linker Kante */
-
-/* Labels-Positionen */
-static const uint16_t s_wc_mc_x   = 2;
-static const uint16_t s_axis_x    = 35;  /* "X:" / "Y:" / "Z:" links von den Zahlen */
-
-/* Divider & Blue-Bar */
-static const uint16_t s_div_y     = 42;  /* dünner Strich zwischen WC/MC */
-static const uint16_t s_blue_y    = 96;  /* Start der blauen Fußzeile */
-
-/* Einmal-Flag für statischen Aufbau */
-static uint8_t s_static_drawn = 0;
 
 /* kleine Writer */
 static inline void PUT_STR(uint16_t x, uint16_t y, const char* s,
