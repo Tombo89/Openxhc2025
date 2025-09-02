@@ -7,7 +7,8 @@
 
 #include "io_inputs.h"
 #include "main.h"
-#include "tim.h"
+#include "stm32f1xx_hal_tim.h"    // optional, aber klarer
+extern TIM_HandleTypeDef htim2;   // kommt aus main.c
 
 /* ========= Pin-/Timer-Mapping (ANPASSEN, falls nötig) =========
  * Wenn du in CubeMX Pins mit Labels versehen hast, kannst du hier
@@ -30,16 +31,6 @@
   #define XHC_ROT6_Pin       GPIO_PIN_1   /* P6 -> Processing/A */
 #endif
 
-/* --- Optionale Zusatz-Pins --- */
-#ifndef XHC_SELECT_HW_GPIO_Port
-  #define XHC_SELECT_HW_GPIO_Port GPIOB
-  #define XHC_SELECT_HW_Pin       GPIO_PIN_4
-#endif
-
-#ifndef XHC_SELECT_POS_GPIO_Port
-  #define XHC_SELECT_POS_GPIO_Port GPIOB
-  #define XHC_SELECT_POS_Pin       GPIO_PIN_3  /* Achtung: kollidiert mit TIM2_CH2 falls genutzt! */
-#endif
 
 /* --- Encoder-Timer (Handle aus tim.c) --- */
 #ifndef XHC_ENC_TIM
@@ -141,14 +132,3 @@ uint8_t IOInputs_RotaryReadCode(void)
     return s_rot_stable;
 }
 
-uint8_t IOInputs_HwIsHB04(void)
-{
-    /* High/Low je nach Verdrahtung – hier High = HB04 (anpassen, falls invertiert) */
-    return (HAL_GPIO_ReadPin(XHC_SELECT_HW_GPIO_Port, XHC_SELECT_HW_Pin) == GPIO_PIN_SET) ? 1u : 0u;
-}
-
-uint8_t IOInputs_PosIsWC(void)
-{
-    /* Alt-Code: "return (PIN_STAT(SELECT_POS) == 0 );" => aktiv LOW */
-    return (HAL_GPIO_ReadPin(XHC_SELECT_POS_GPIO_Port, XHC_SELECT_POS_Pin) == GPIO_PIN_RESET) ? 1u : 0u;
-}

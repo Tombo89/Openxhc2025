@@ -27,6 +27,7 @@
 #include "xhc_display.h"
 #include "ST7735.h"
 #include "GFX_FUNCTIONS.h"
+#include "io_inputs.h"
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -113,6 +114,9 @@ int main(void)
   fillScreen(WHITE);
   XHC_Display_Init();
   RenderScreen_Init();
+
+  HAL_TIM_Encoder_Start(&htim2, TIM_CHANNEL_ALL);
+  __HAL_TIM_SET_COUNTER(&htim2, 0);
   //testAll();
   /* USER CODE END 2 */
 
@@ -289,8 +293,12 @@ static void MX_GPIO_Init(void)
   GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
   HAL_GPIO_Init(GPIOA, &GPIO_InitStruct);
 
-  /*Configure GPIO pins : Rot_A_Pin Rot_S_Pin Rot_F_Pin */
-  GPIO_InitStruct.Pin = Rot_A_Pin|Rot_S_Pin|Rot_F_Pin;
+  /*Configure GPIO pins : Rot_A_Pin Rot_S_Pin Rot_F_Pin Row1_Pin
+                           Row2_Pin Row3_Pin Row4_Pin Col1_Pin
+                           Col2_Pin Col3_Pin Col4_Pin */
+  GPIO_InitStruct.Pin = Rot_A_Pin|Rot_S_Pin|Rot_F_Pin|Row1_Pin
+                          |Row2_Pin|Row3_Pin|Row4_Pin|Col1_Pin
+                          |Col2_Pin|Col3_Pin|Col4_Pin;
   GPIO_InitStruct.Mode = GPIO_MODE_INPUT;
   GPIO_InitStruct.Pull = GPIO_PULLUP;
   HAL_GPIO_Init(GPIOB, &GPIO_InitStruct);

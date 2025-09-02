@@ -62,10 +62,10 @@
   * @{
   */
 
-#define USBD_VID     1155
+#define USBD_VID     0x10CE
 #define USBD_LANGID_STRING     1033
 #define USBD_MANUFACTURER_STRING     "STMicroelectronics"
-#define USBD_PID_FS     22352
+#define USBD_PID_FS     0xEB70
 #define USBD_PRODUCT_STRING_FS     "STM32 Custom Human interface"
 #define USBD_CONFIGURATION_STRING_FS     "Custom HID Config"
 #define USBD_INTERFACE_STRING_FS     "Custom HID Interface"
@@ -146,24 +146,20 @@ USBD_DescriptorsTypeDef FS_Desc =
 /** USB standard device descriptor. */
 __ALIGN_BEGIN uint8_t USBD_FS_DeviceDesc[USB_LEN_DEV_DESC] __ALIGN_END =
 {
-  0x12,                       /*bLength */
-  USB_DESC_TYPE_DEVICE,       /*bDescriptorType*/
-  0x00,                       /*bcdUSB */
-  0x02,
-  0x00,                       /*bDeviceClass*/
-  0x00,                       /*bDeviceSubClass*/
-  0x00,                       /*bDeviceProtocol*/
-  USB_MAX_EP0_SIZE,           /*bMaxPacketSize*/
-  LOBYTE(USBD_VID),           /*idVendor*/
-  HIBYTE(USBD_VID),           /*idVendor*/
-  LOBYTE(USBD_PID_FS),        /*idProduct*/
-  HIBYTE(USBD_PID_FS),        /*idProduct*/
-  0x00,                       /*bcdDevice rel. 2.00*/
-  0x02,
-  USBD_IDX_MFC_STR,           /*Index of manufacturer  string*/
-  USBD_IDX_PRODUCT_STR,       /*Index of product string*/
-  USBD_IDX_SERIAL_STR,        /*Index of serial number string*/
-  USBD_MAX_NUM_CONFIGURATION  /*bNumConfigurations*/
+	    0x12, 	/* bLength 		*/
+	    0x01, 	/* bDescriptorType      */
+	    0x10,0x01, 	/* bcdUSB 		*/
+	    0x00, 	/* bDeviceClass 	*/
+	    0x00, 	/* bDeviceSubClass 	*/
+	    0x00, 	/* bDeviceProtocol 	*/
+	    0x40, 	/* bMaxPacketSize0 	*/
+	    0xCE,0x10, 	/* idVendor 		*/
+	    0x70,0xEB, 	/* idProduct 		*/
+	    0x00,0x00, 	/* bcdDevice 		*/
+	    0x01, 	/* iManufacturer 	*/
+	    0x00, 	/* iProduct 		*/
+	    0x00, 	/* iSerialNumber 	*/
+	    0x01, 	/* bNumConfigurations   */
 };
 
 /* USB_DeviceDescriptor */
@@ -391,4 +387,3 @@ static void IntToUnicode(uint32_t value, uint8_t * pbuf, uint8_t len)
 /**
   * @}
   */
-

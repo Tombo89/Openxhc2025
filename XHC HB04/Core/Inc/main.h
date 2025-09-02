@@ -69,6 +69,14 @@ void Error_Handler(void);
 #define Rot_S_GPIO_Port GPIOB
 #define Rot_F_Pin GPIO_PIN_11
 #define Rot_F_GPIO_Port GPIOB
+#define Row1_Pin GPIO_PIN_12
+#define Row1_GPIO_Port GPIOB
+#define Row2_Pin GPIO_PIN_13
+#define Row2_GPIO_Port GPIOB
+#define Row3_Pin GPIO_PIN_14
+#define Row3_GPIO_Port GPIOB
+#define Row4_Pin GPIO_PIN_15
+#define Row4_GPIO_Port GPIOB
 #define Rot_X_Pin GPIO_PIN_8
 #define Rot_X_GPIO_Port GPIOA
 #define Rot_Y_Pin GPIO_PIN_9
@@ -79,6 +87,14 @@ void Error_Handler(void);
 #define ENC_A_GPIO_Port GPIOA
 #define ENC_B_Pin GPIO_PIN_3
 #define ENC_B_GPIO_Port GPIOB
+#define Col1_Pin GPIO_PIN_5
+#define Col1_GPIO_Port GPIOB
+#define Col2_Pin GPIO_PIN_6
+#define Col2_GPIO_Port GPIOB
+#define Col3_Pin GPIO_PIN_7
+#define Col3_GPIO_Port GPIOB
+#define Col4_Pin GPIO_PIN_8
+#define Col4_GPIO_Port GPIOB
 
 /* USER CODE BEGIN Private defines */
 
