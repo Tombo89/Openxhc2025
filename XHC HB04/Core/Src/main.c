@@ -28,6 +28,7 @@
 #include "ST7735.h"
 #include "GFX_FUNCTIONS.h"
 #include "io_inputs.h"
+#include "xhc_input_bridge.h"
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -109,6 +110,7 @@ int main(void)
   MX_USB_DEVICE_Init();
   MX_TIM2_Init();
   /* USER CODE BEGIN 2 */
+  XHC_InputBridge_Init();
   IOInputs_Init();
   ST7735_Init(3);
   fillScreen(WHITE);
@@ -124,7 +126,8 @@ int main(void)
   /* USER CODE BEGIN WHILE */
   while (1)
   {
-	    RenderScreen();     // <— nur noch ein Aufruf
+	    RenderScreen();
+	    XHC_InputBridge_Tick();
 	    HAL_Delay(1);
     /* USER CODE END WHILE */
 
