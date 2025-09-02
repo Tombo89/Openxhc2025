@@ -110,6 +110,28 @@ int main(void)
   MX_USB_DEVICE_Init();
   MX_TIM2_Init();
   /* USER CODE BEGIN 2 */
+
+  // Start Setting ENCODER x4
+  HAL_TIM_Encoder_Stop(&htim2, TIM_CHANNEL_ALL);
+
+  TIM_Encoder_InitTypeDef s = {0};
+  s.EncoderMode    = TIM_ENCODERMODE_TI12;
+  s.IC1Polarity    = TIM_ICPOLARITY_BOTHEDGE;
+  s.IC1Selection   = TIM_ICSELECTION_DIRECTTI;
+  s.IC1Prescaler   = TIM_ICPSC_DIV1;
+  s.IC1Filter      = 4;  // leichtes Entprellen
+  s.IC2Polarity    = TIM_ICPOLARITY_BOTHEDGE;
+  s.IC2Selection   = TIM_ICSELECTION_DIRECTTI;
+  s.IC2Prescaler   = TIM_ICPSC_DIV1;
+  s.IC2Filter      = 4;
+
+  HAL_TIM_Encoder_DeInit(&htim2);
+  HAL_TIM_Encoder_Init(&htim2, &s);
+  __HAL_TIM_SET_COUNTER(&htim2, 0);
+  HAL_TIM_Encoder_Start(&htim2, TIM_CHANNEL_ALL);
+
+  // END Setting ENCODER x4
+
   XHC_InputBridge_Init();
   IOInputs_Init();
   ST7735_Init(3);

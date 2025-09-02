@@ -1,21 +1,26 @@
 /*
  * io_input.c
- *
  *  Created on: Sep 2, 2025
  *      Author: Thomas Weckmann
  */
 
 #include "io_inputs.h"
 #include "main.h"
-#include "stm32f1xx_hal_tim.h"    // optional, aber klarer
-extern TIM_HandleTypeDef htim2;   // kommt aus main.c
+#include "stm32f1xx_hal_tim.h"
 
-/* ========= Pin-/Timer-Mapping (ANPASSEN, falls nötig) =========
- * Wenn du in CubeMX Pins mit Labels versehen hast, kannst du hier
- * auf diese Labels mappen. Standardmäßig nutzen wir die Alt-Belegung.
- */
+extern TIM_HandleTypeDef htim2;     // kommt aus tim.c/main.c
 
-/* --- Rotary 6-Pos Schalter --- */
+/* --- Encoder-Timer Handle als Macro kapseln (einheitlich nutzen) --- */
+#ifndef XHC_ENC_TIM
+  #define XHC_ENC_TIM htim2
+#endif
+
+/* --- Encoder-Detent-Auflösung (4 Flanken = 1 Rastung) --- */
+#ifndef XHC_ENC_PULSES_PER_DETENT
+  #define XHC_ENC_PULSES_PER_DETENT  4
+#endif
+
+/* --- Rotary-Pins (Fallback, falls keine CubeMX-Labels existieren) --- */
 #ifndef XHC_ROT1_GPIO_Port
   #define XHC_ROT1_GPIO_Port GPIOA
   #define XHC_ROT1_Pin       GPIO_PIN_8   /* P1 -> X */
@@ -31,32 +36,20 @@ extern TIM_HandleTypeDef htim2;   // kommt aus main.c
   #define XHC_ROT6_Pin       GPIO_PIN_1   /* P6 -> Processing/A */
 #endif
 
-
-/* --- Encoder-Timer (Handle aus tim.c) --- */
-#ifndef XHC_ENC_TIM
-  #define XHC_ENC_TIM htim2 /* ändere auf htim3/htim4 etc., falls anderer Timer */
-#endif
-
-/* --- Encoder-Detent-Auflösung (4 Flanken = 1 Rastung) --- */
-#ifndef XHC_ENC_PULSES_PER_DETENT
-  #define XHC_ENC_PULSES_PER_DETENT 4
-#endif
-
-/* --- Entprell-Zeit Rotary (ms) --- */
+/* --- Entprellzeit Rotary (ms) --- */
 #ifndef XHC_ROT_DEBOUNCE_MS
-  #define XHC_ROT_DEBOUNCE_MS 5u
+  #define XHC_ROT_DEBOUNCE_MS  5u
 #endif
 
-/* ========= interne Stati ========= */
+/* ========= interne Stati (GENAU EINMAL!) ========= */
 static uint16_t s_enc_prev_cnt = 0;
 static int32_t  s_enc_accum    = 0;
 
-static uint8_t  s_rot_last_raw   = 0;     /* zuletzt gelesener Rohcode */
-static uint8_t  s_rot_stable     = 0;     /* entprellt stabiler Code */
-static uint32_t s_rot_change_tms = 0;     /* Start der Debounce-Phase */
+static uint8_t  s_rot_last_raw   = 0;
+static uint8_t  s_rot_stable     = 0;
+static uint32_t s_rot_change_tms = 0;
 
 /* ========= helpers ========= */
-
 static inline uint8_t pin_low(GPIO_TypeDef *port, uint16_t pin)
 {
     return (HAL_GPIO_ReadPin(port, pin) == GPIO_PIN_RESET) ? 1u : 0u;
@@ -78,7 +71,7 @@ static uint8_t rotary_read_raw(void)
 
 void IOInputs_Init(void)
 {
-    /* Encoder starten (Timer muss in CubeMX als Encoder konfiguriert sein) */
+    /* Encoder starten (Timer in CubeMX als Encoder konfiguriert) */
     HAL_TIM_Encoder_Start(&XHC_ENC_TIM, TIM_CHANNEL_ALL);
 
     /* Startwert merken */
@@ -96,39 +89,54 @@ void IOInputs_Deinit(void)
     HAL_TIM_Encoder_Stop(&XHC_ENC_TIM, TIM_CHANNEL_ALL);
 }
 
-/* Liefert +- Rastungen seit letztem Aufruf (Wrap-around sicher) */
-int16_t IOInputs_EncoderReadDetents(void)
+/* Optional von außen aufrufbar, um Zähler und Accum zu synchronisieren */
+void io_encoder_sync_counter(void)
 {
-    uint16_t cur = __HAL_TIM_GET_COUNTER(&XHC_ENC_TIM);
-    int16_t diff = (int16_t)(cur - s_enc_prev_cnt); /* signed: Wrap korrekt */
-    s_enc_prev_cnt = cur;
-
-    s_enc_accum += diff;
-    int16_t det  = (int16_t)(s_enc_accum / XHC_ENC_PULSES_PER_DETENT);
-    s_enc_accum -= (int32_t)det * XHC_ENC_PULSES_PER_DETENT;
-
-    return det;
+    s_enc_prev_cnt = __HAL_TIM_GET_COUNTER(&XHC_ENC_TIM);
+    s_enc_accum    = 0;
 }
 
-/* Entprellter Rotary-Code:
- * Änderung wird erst nach XHC_ROT_DEBOUNCE_MS übernommen,
- * wenn der Rohcode stabil bleibt.
- */
+/* Liefert +- Rastungen seit letztem Aufruf (Wrap-around sicher)
+   OFF: nichts puffern → sofort verwerfen und 0 liefern */
+int16_t IOInputs_EncoderReadDetents(void)
+{
+    /* Zählerstand lesen */
+    uint16_t cur = __HAL_TIM_GET_COUNTER(&XHC_ENC_TIM);
+
+    /* Rotary prüfen → OFF? dann alles verwerfen und 0 liefern */
+    uint8_t mode = IOInputs_RotaryReadCode();  // 0x00 = OFF
+    if (mode == XHC_ROT_OFF) {
+        s_enc_prev_cnt = cur;  /* Referenz nachziehen */
+        s_enc_accum    = 0;    /* Puffer leeren */
+        return 0;
+    }
+
+    /* Diff wrap-sicher bilden & Referenz updaten */
+    int16_t diff = (int16_t)(cur - s_enc_prev_cnt);
+    s_enc_prev_cnt = cur;
+
+    /* Flanken akkumulieren → Rastungen extrahieren */
+    s_enc_accum += diff;
+    int16_t detents = (int16_t)(s_enc_accum / XHC_ENC_PULSES_PER_DETENT);
+    s_enc_accum -= (int32_t)detents * XHC_ENC_PULSES_PER_DETENT;
+
+    return detents;  // kann negativ sein
+}
+
+/* Entprellter Rotary-Code: Änderung erst nach XHC_ROT_DEBOUNCE_MS übernehmen */
 uint8_t IOInputs_RotaryReadCode(void)
 {
-    uint8_t raw = rotary_read_raw();
+    uint8_t  raw = rotary_read_raw();
     uint32_t now = HAL_GetTick();
 
     if (raw != s_rot_last_raw) {
         s_rot_last_raw   = raw;
-        s_rot_change_tms = now; /* Debounce neu starten */
-        return s_rot_stable;    /* bis Debounce durch ist, alten Wert liefern */
+        s_rot_change_tms = now;       /* Debounce neu starten */
+        return s_rot_stable;          /* bis Debounce fertig, alten Wert liefern */
     }
 
     if ((now - s_rot_change_tms) >= XHC_ROT_DEBOUNCE_MS) {
-        /* stabil genug -> übernehmen */
-        s_rot_stable = raw;
+        s_rot_stable = raw;           /* stabil → übernehmen */
     }
     return s_rot_stable;
 }
-

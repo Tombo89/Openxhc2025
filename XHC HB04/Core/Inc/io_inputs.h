@@ -37,6 +37,8 @@ int16_t IOInputs_EncoderReadDetents(void);
 /* Rotary: stabil entprellter Code (s.o.). Gibt OFF, wenn keine Position aktiv. */
 uint8_t IOInputs_RotaryReadCode(void);
 
+int16_t io_encoder_read_detents(void);  // liest & konsumiert Detents
+void    io_encoder_flush(void);         // setzt internen Stand zurück
 
 #ifdef __cplusplus
 }
