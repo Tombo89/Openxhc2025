@@ -110,6 +110,8 @@
 #define YELLOW 0xFFE0
 #endif
 
+
+
 /* Offsets im 37-Byte-Frame (LE) – nur für die Overrides */
 
 
@@ -317,7 +319,7 @@ static inline void DrawFooterText(uint8_t slot, uint16_t x, uint16_t y, const ch
 
 /* letzter angezeigter Prozentwert je Bar (zum Skippen unveränderter Frames) */
 static uint16_t s_last_bar_val[2] = { 0xFFFF, 0xFFFF };
-static uint32_t s_last_bar_t[2] = {0, 0};
+
 
 /* Rahmen einer Bar einmalig zeichnen (blauer Hintergrund ist schon da) */
 static void DrawBarFrame(uint16_t x, uint16_t y, uint16_t w, uint16_t h)
@@ -335,68 +337,57 @@ static void DrawBarValue(uint8_t which /*0=F,1=S*/,
                          uint16_t x, uint16_t y, uint16_t w, uint16_t h,
                          uint16_t pct, uint16_t minp, uint16_t maxp)
 {
-
-	uint32_t now = HAL_GetTick();
-	if ((now - s_last_bar_t[which]) < BAR_MIN_PERIOD_MS && pct != 100u) {
-	    return;   // zu früh, diesen Zwischenschritt überspringen
-	}
-
-
-    if (pct == s_last_bar_val[which]) return;  /* nix zu tun */
-
     if (pct < minp) pct = minp;
     if (pct > maxp) pct = maxp;
+    if (pct == s_last_bar_val[which]) return;
 
-    /* Innenraum wischen (Outline + Center stehen lassen) */
+    /* Innenraum komplett auf Blau (löscht evtl. hängende Pixel) */
     fillRect((int16_t)(x+1), (int16_t)(y+1), (int16_t)(w-2), (int16_t)(h-2), BLUE);
 
     /* Center-Linie (100%) */
     uint16_t cx = (uint16_t)(x + w/2u);
     drawFastVLine((int16_t)cx, (int16_t)(y+1), (int16_t)(h-2), WHITE);
 
-    /* Füllung einfärben: links <100% = ROT, rechts >100% = GRÜN */
+    /* Rechts (>100%) – nie über den Innenbereich hinaus */
     if (pct > 100u) {
-        /* rechts: von cx nach rechts */
-    	uint32_t span   = (uint32_t)(maxp - 100u);
-    	uint32_t rel    = (uint32_t)(pct  - 100u);
-    	uint16_t len_px = (span ? (uint16_t)((rel * (w/2u) + span/2u)/span) : 0u);
-    	/* >>> Clamp, damit nie bis in den Rahmen gemalt wird */
-    	uint16_t max_len = (uint16_t)(w/2u - 1u);
-    	if (len_px > max_len) len_px = max_len;
-
-    	if (len_px) {
-    	    fillRect((int16_t)cx, (int16_t)(y+1), (int16_t)len_px, (int16_t)(h-2), GREEN);
-    	}
-    } else if (pct < 100u) {
-        /* links: von cx-len nach links */
-    	uint32_t span   = (uint32_t)(100u - minp);
-    	uint32_t rel    = (uint32_t)(100u - pct);
-    	uint16_t len_px = (span ? (uint16_t)((rel * (w/2u) + span/2u)/span) : 0u);
-    	/* >>> Clamp wie oben */
-    	uint16_t max_len = (uint16_t)(w/2u - 1u);
-    	if (len_px > max_len) len_px = max_len;
-
-    	if (len_px) {
-    	    fillRect((int16_t)(cx - len_px), (int16_t)(y+1),
-    	             (int16_t)len_px, (int16_t)(h-2), RED);
-    	}
+        uint32_t span   = (uint32_t)(maxp - 100u);
+        uint32_t rel    = (uint32_t)(pct  - 100u);
+        uint16_t len_px = span ? (uint16_t)((rel * (w/2u) + span/2u)/span) : 0u;
+        /* Clamp: maximal bis Innenkante rechts (nie den Außenrand berühren) */
+        uint16_t len_max = (uint16_t)((w/2u) - 1u);
+        if (len_px > len_max) len_px = len_max;
+        if (len_px) fillRect((int16_t)cx, (int16_t)(y+1), (int16_t)len_px, (int16_t)(h-2), GREEN);
+    }
+    /* Links (<100%) – nie vor die Innenkante links */
+    else if (pct < 100u) {
+        uint32_t span   = (uint32_t)(100u - minp);
+        uint32_t rel    = (uint32_t)(100u - pct);
+        uint16_t len_px = span ? (uint16_t)((rel * (w/2u) + span/2u)/span) : 0u;
+        /* Clamp analog wie rechts */
+        uint16_t len_max = (uint16_t)((w/2u) - 1u);
+        if (len_px > len_max) len_px = len_max;
+        if (len_px) {
+            uint16_t start_x = (uint16_t)(cx - len_px);
+            if (start_x < (uint16_t)(x+1)) start_x = (uint16_t)(x+1);
+            fillRect((int16_t)start_x, (int16_t)(y+1), (int16_t)len_px, (int16_t)(h-2), RED);
+        }
     }
 
-    /* Prozenttext mittig (weiß auf blau) */
-    char txt[8];
-    int n = snprintf(txt, sizeof(txt), "%u%%", (unsigned)pct);
-    if (n < 0) txt[0] = 0;
+    /* Prozentstring: feste 4 Zeichen ("___%") – immer gleiche Position */
+    char txt[5];
+    (void)snprintf(txt, sizeof(txt), "%3u", (unsigned)pct);
+    txt[3] = '%'; txt[4] = '\0';
 
-    uint16_t tw = (uint16_t)(strlen(txt) * CHAR_W);
-    uint16_t tx = (uint16_t)(x + (w - tw)/2u);
-    uint16_t ty = (h > LINE_H) ? (uint16_t)(y + (h - LINE_H)/2u) : y;
+    /* Zentrierung relativ zur Innenhöhe */
+    const uint16_t FONT7_H = 10u;                 // Font_7x10
+    uint16_t inner_h = (uint16_t)(h - 2u);
+    uint16_t tx = (uint16_t)(x + (w - (4u * CHAR_W))/2u);
+    uint16_t ty = (uint16_t)(y + 1u + ((inner_h > FONT7_H) ? (inner_h - FONT7_H)/2u : 0u));
 
-    /* Text-Hintergrund leicht „säubern“, dann Text zeichnen */
-    fillRect((int16_t)tx, (int16_t)ty, (int16_t)tw, (int16_t)LINE_H, BLUE);
+    /* Opaques Schreiben (bg=BLUE) -> kein extra Clear nötig, weniger Flackern */
     ST7735_WriteString(tx, ty, txt, Font_7x10, WHITE, BLUE);
 
     s_last_bar_val[which] = pct;
-    s_last_bar_t[which]   = now;
 }
 
 
