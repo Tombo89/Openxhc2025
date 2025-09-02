@@ -37,11 +37,6 @@ int16_t IOInputs_EncoderReadDetents(void);
 /* Rotary: stabil entprellter Code (s.o.). Gibt OFF, wenn keine Position aktiv. */
 uint8_t IOInputs_RotaryReadCode(void);
 
-/* Optional: HW-Typ lesen (HIGH = HB04 je nach Verdrahtung) */
-uint8_t IOInputs_HwIsHB04(void);
-
-/* Optional: Positionsmodus (1 = WC aktiv), falls SELECT_POS verbaut ist */
-uint8_t IOInputs_PosIsWC(void);
 
 #ifdef __cplusplus
 }

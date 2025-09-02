@@ -226,7 +226,7 @@ static char RotaryCodeToLetter(uint8_t code)
 static void UpdatePOS_FromRotary(void)
 {
     uint32_t now  = HAL_GetTick();
-    uint8_t  raw  = rotary_read();   /* kommt aus io_input.c */
+    uint8_t  raw  = IOInputs_RotaryReadCode();   /* kommt aus io_input.c */
     char     lett = RotaryCodeToLetter(raw);
 
     if (lett) {
