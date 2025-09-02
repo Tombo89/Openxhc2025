@@ -20,14 +20,18 @@
 #include "main.h"
 #include "usb_device.h"
 
+
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
-#include "usbd_custom_hid_if.h"
+#include <stdint.h>
+#include "xhc_screen.h"
+#include "xhc_display.h"
+#include "ST7735.h"
+#include "GFX_FUNCTIONS.h"
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
 /* USER CODE BEGIN PTD */
-static uint8_t dbg[64];
 /* USER CODE END PTD */
 
 /* Private define ------------------------------------------------------------*/
@@ -52,7 +56,16 @@ void SystemClock_Config(void);
 static void MX_GPIO_Init(void);
 static void MX_SPI1_Init(void);
 /* USER CODE BEGIN PFP */
+void insert_thousand_separators(char *s);
+void string2uint(int32_t value, char padd, char *o);
+void string2fixed3(int32_t value, char *out);
+void string2int(int32_t value, char padd, char *o);
 
+/* HB04/HB03 Positionsformat:
+   Vorzeichen steckt im MSB von ifrac (bit15). ipadd/fpadd = Mindestbreite int/fract. */
+void xhc2string(uint16_t iint, uint16_t ifrac, char ipadd, char fpadd, char *o);
+
+void int2strprec( int32_t v, char padd, char *o );
 /* USER CODE END PFP */
 
 /* Private user code ---------------------------------------------------------*/
@@ -84,14 +97,7 @@ int main(void)
   SystemClock_Config();
 
   /* USER CODE BEGIN SysInit */
-  void App_Poll(void)
-  {
-      uint16_t n = sizeof(dbg);
-      while (XHC_RX_TryPop(dbg, &n)) {
-          /* Breakpoint hier – dbg[0] = ReportID (sollte 0x06 sein), dbg[1..7] Payload */
-          n = sizeof(dbg);
-      }
-  }
+
   /* USER CODE END SysInit */
 
   /* Initialize all configured peripherals */
@@ -99,17 +105,21 @@ int main(void)
   MX_SPI1_Init();
   MX_USB_DEVICE_Init();
   /* USER CODE BEGIN 2 */
-
+  ST7735_Init(3);
+  fillScreen(WHITE);
+  XHC_Display_Init();
+  RenderScreen_Init();
+  //testAll();
   /* USER CODE END 2 */
 
   /* Infinite loop */
   /* USER CODE BEGIN WHILE */
   while (1)
   {
+	    RenderScreen();     // <— nur noch ein Aufruf
+	    HAL_Delay(1);
     /* USER CODE END WHILE */
-	  App_Poll();               // neue Feature-Reports aus dem Ringpuffer abholen
 
-	        HAL_Delay(1);             // optional: 1–2 ms, damit die CPU nicht 100% frisst
     /* USER CODE BEGIN 3 */
   }
   /* USER CODE END 3 */
@@ -214,6 +224,7 @@ static void MX_GPIO_Init(void)
   /* GPIO Ports Clock Enable */
   __HAL_RCC_GPIOD_CLK_ENABLE();
   __HAL_RCC_GPIOA_CLK_ENABLE();
+  __HAL_RCC_GPIOB_CLK_ENABLE();
 
   /*Configure GPIO pin Output Level */
   HAL_GPIO_WritePin(GPIOA, GPIO_PIN_2|GPIO_PIN_3|GPIO_PIN_4, GPIO_PIN_RESET);
