@@ -20,6 +20,8 @@
 
 #include "io_inputs.h"   // liefert io_rotary_read()
 
+#include "xhc_input_bridge.h"
+
 /* ==== Farb-/Display-Konstanten ==== */
 #ifndef WHITE
 #define WHITE 0xFFFF
@@ -582,6 +584,7 @@ void RenderScreen(void)
             if (!have_live) return;
             want = 1;  /* auf Live umschalten */
         } else {
+        	XHC_InputBridge_SetDay(f.day);
             char v[6][12];  /* 6 Werte je max 11 inkl. 0 */
 
             /* exakt 10-stellig – Dezimalpunkte in einer Flucht */
