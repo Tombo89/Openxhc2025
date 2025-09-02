@@ -29,6 +29,7 @@
 #include "GFX_FUNCTIONS.h"
 #include "io_inputs.h"
 #include "xhc_input_bridge.h"
+#include "io_kbd.h"
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -133,6 +134,7 @@ int main(void)
   // END Setting ENCODER x4
 
   XHC_InputBridge_Init();
+  KBD_Init();
   IOInputs_Init();
   ST7735_Init(3);
   fillScreen(WHITE);
