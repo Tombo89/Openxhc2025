@@ -87,6 +87,9 @@
 
 #define BAR_MIN_PERIOD_MS  40u
 
+/* POS-Text links oben im blauen Balken */
+#define POS_X      2u
+#define POS_Y      (s_blue_y + 2u)
 
 /* OFF erst anzeigen, wenn der Schalter so lange wirklich "offen" ist */
 #define ROT_OFF_DELAY_MS   120u
@@ -315,11 +318,6 @@ static const uint16_t s_axis_x    = 35;  /* "X:" / "Y:" / "Z:" links von den Zah
 /* Divider & Blue-Bar */
 static const uint16_t s_div_y     = 42;  /* dünner Strich zwischen WC/MC */
 static const uint16_t s_blue_y    = 96;  /* Start der blauen Fußzeile */
-
-/* POS-Text links oben im blauen Balken */
-#define POS_X      2u
-#define POS_Y      (s_blue_y + 2u)
-
 
 /* Einmal-Flag für statischen Aufbau */
 static uint8_t s_static_drawn = 0;
