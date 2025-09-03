@@ -62,49 +62,45 @@ static inline int8_t clamp_i8(int32_t v, int32_t lim){
 
 void XHC_InputBridge_Tick(void)
 {
-    // 1) Buttons zuerst fetchen (liefert 0/0 wenn nichts gedrückt)
-    uint8_t btn1 = 0, btn2 = 0;
-    KBD_Fetch(&btn1, &btn2);
-
-    // 2) Rotary-Mode immer mitliefern
-    uint8_t rot = IOInputs_RotaryReadCode();
-
-    // 3) Encoder-Rastungen einsammeln und aufsummieren
-    int16_t d = IOInputs_EncoderReadDetents();
-    if (d) {
+    /* 1) Encoder-Rastungen einsammeln */
+    int16_t d = IOInputs_EncoderReadDetents();   /* ±N pro Aufruf */
+    if (d){
         int32_t acc = (int32_t)s_pending_detents + d;
         if (acc >  32767) acc =  32767;
         if (acc < -32768) acc = -32768;
         s_pending_detents = (int16_t)acc;
     }
 
-    // 4) Nichts zu senden? (weder Buttons noch Wheel) -> raus
-    if (btn1 == 0 && btn2 == 0 && s_pending_detents == 0) return;
+    if (s_pending_detents == 0) return;
 
-    // 5) USB-Kanal frei?
+    /* 2) Rotary-Mode ermitteln (0=OFF, sonst 0x11..0x18) */
+    uint8_t rot = IOInputs_RotaryReadCode();
+#if IGNORE_WHEN_OFF
+    if (rot == 0) return;       /* Achse abgewählt → nichts senden */
+#endif
+
+    /* 3) USB-Kanal frei? (sonst BUSY → Report würde verworfen) */
     USBD_CUSTOM_HID_HandleTypeDef *hhid =
         (USBD_CUSTOM_HID_HandleTypeDef*)hUsbDeviceFS.pClassData;
     if (!hhid || hhid->state != CUSTOM_HID_IDLE) return;
 
-    // 6) Wheel-Schritt (ggf. 0)
-    int8_t burst = 0;
-    if (s_pending_detents) {
-        int32_t v = s_pending_detents;
-        if (v >  MAX_DETENTS_PER_RPT) v =  MAX_DETENTS_PER_RPT;
-        if (v < -MAX_DETENTS_PER_RPT) v = -MAX_DETENTS_PER_RPT;
-        burst = (int8_t)v;
-    }
+    /* 4) Buttons (falls vorhanden) + Δ begrenzen */
+    uint8_t btn1, btn2;
+    KBD_Fetch(&btn1, &btn2);
+    int8_t burst = clamp_i8(s_pending_detents, MAX_DETENTS_PER_RPT);
 
-    // 7) Report 0x04 (6 Bytes) füllen
+    /* 5) Report 0x04 füllen (genau 6 Bytes) */
     uint8_t rpt[XHC_RPT_IN_LEN];
-    rpt[POS_ID]        = XHC_RPT_IN_ID;          // 0x04
+    rpt[POS_ID]        = XHC_RPT_IN_ID;
     rpt[POS_BTN1]      = btn1;
     rpt[POS_BTN2]      = btn2;
-    rpt[POS_WHEELMODE] = rot;                    // immer mitschicken
-    rpt[POS_WHEEL]     = (uint8_t)burst;         // signed cast
-    rpt[POS_XORDAY]    = (uint8_t)(s_day ^ btn1);// wie Altcode
+    rpt[POS_WHEELMODE] = rot;
+    rpt[POS_WHEEL]     = (uint8_t)burst;     /* signed cast gewollt */
+    rpt[POS_XORDAY]    = (uint8_t)(s_day ^ btn1);   /* !!! wie im Altcode !!! */
 
-    if (USBD_CUSTOM_HID_SendReport(&hUsbDeviceFS, rpt, sizeof(rpt)) == USBD_OK) {
-        s_pending_detents -= burst;              // nur reduzieren wenn gesendet
+    /* 6) Abschicken */
+    if (USBD_CUSTOM_HID_SendReport(&hUsbDeviceFS, rpt, sizeof(rpt)) == USBD_OK){
+        s_pending_detents -= burst;  /* nur abbuchen, wenn wirklich unterwegs */
+        /* hhid->state wird im Stack auf BUSY gesetzt bis IN-Transfer fertig ist */
     }
 }

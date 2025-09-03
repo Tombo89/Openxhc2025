@@ -28,6 +28,8 @@
 #include "ST7735.h"
 #include "GFX_FUNCTIONS.h"
 #include "io_inputs.h"
+#include "xhc_input_bridge.h"
+#include "io_kbd.h"
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -109,6 +111,30 @@ int main(void)
   MX_USB_DEVICE_Init();
   MX_TIM2_Init();
   /* USER CODE BEGIN 2 */
+
+  // Start Setting ENCODER x4
+  HAL_TIM_Encoder_Stop(&htim2, TIM_CHANNEL_ALL);
+
+  TIM_Encoder_InitTypeDef s = {0};
+  s.EncoderMode    = TIM_ENCODERMODE_TI12;
+  s.IC1Polarity    = TIM_ICPOLARITY_BOTHEDGE;
+  s.IC1Selection   = TIM_ICSELECTION_DIRECTTI;
+  s.IC1Prescaler   = TIM_ICPSC_DIV1;
+  s.IC1Filter      = 4;  // leichtes Entprellen
+  s.IC2Polarity    = TIM_ICPOLARITY_BOTHEDGE;
+  s.IC2Selection   = TIM_ICSELECTION_DIRECTTI;
+  s.IC2Prescaler   = TIM_ICPSC_DIV1;
+  s.IC2Filter      = 4;
+
+  HAL_TIM_Encoder_DeInit(&htim2);
+  HAL_TIM_Encoder_Init(&htim2, &s);
+  __HAL_TIM_SET_COUNTER(&htim2, 0);
+  HAL_TIM_Encoder_Start(&htim2, TIM_CHANNEL_ALL);
+
+  // END Setting ENCODER x4
+
+  XHC_InputBridge_Init();
+  KBD_Init();
   IOInputs_Init();
   ST7735_Init(3);
   fillScreen(WHITE);
@@ -118,13 +144,19 @@ int main(void)
   HAL_TIM_Encoder_Start(&htim2, TIM_CHANNEL_ALL);
   __HAL_TIM_SET_COUNTER(&htim2, 0);
   //testAll();
+
+  void HAL_SYSTICK_Callback(void)
+  {
+      KBD_Tick1ms();   // wird alle 1 ms vom SysTick aufgerufen
+  }
   /* USER CODE END 2 */
 
   /* Infinite loop */
   /* USER CODE BEGIN WHILE */
   while (1)
   {
-	    RenderScreen();     // <— nur noch ein Aufruf
+	    RenderScreen();
+	    XHC_InputBridge_Tick();
 	    HAL_Delay(1);
     /* USER CODE END WHILE */
 
@@ -293,8 +325,12 @@ static void MX_GPIO_Init(void)
   GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
   HAL_GPIO_Init(GPIOA, &GPIO_InitStruct);
 
-  /*Configure GPIO pins : Rot_A_Pin Rot_S_Pin Rot_F_Pin */
-  GPIO_InitStruct.Pin = Rot_A_Pin|Rot_S_Pin|Rot_F_Pin;
+  /*Configure GPIO pins : Rot_A_Pin Rot_S_Pin Rot_F_Pin Row1_Pin
+                           Row2_Pin Row3_Pin Row4_Pin Col1_Pin
+                           Col2_Pin Col3_Pin Col4_Pin */
+  GPIO_InitStruct.Pin = Rot_A_Pin|Rot_S_Pin|Rot_F_Pin|Row1_Pin
+                          |Row2_Pin|Row3_Pin|Row4_Pin|Col1_Pin
+                          |Col2_Pin|Col3_Pin|Col4_Pin;
   GPIO_InitStruct.Mode = GPIO_MODE_INPUT;
   GPIO_InitStruct.Pull = GPIO_PULLUP;
   HAL_GPIO_Init(GPIOB, &GPIO_InitStruct);

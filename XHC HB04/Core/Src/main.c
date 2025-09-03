@@ -133,6 +133,12 @@ int main(void)
 
   // END Setting ENCODER x4
 
+
+  HAL_GPIO_WritePin(Row1_GPIO_Port, Row1_Pin, GPIO_PIN_SET);
+  HAL_GPIO_WritePin(Row2_GPIO_Port, Row2_Pin, GPIO_PIN_SET);
+  HAL_GPIO_WritePin(Row3_GPIO_Port, Row3_Pin, GPIO_PIN_SET);
+  HAL_GPIO_WritePin(Row4_GPIO_Port, Row4_Pin, GPIO_PIN_SET);
+
   XHC_InputBridge_Init();
   KBD_Init();
   IOInputs_Init();
@@ -145,10 +151,7 @@ int main(void)
   __HAL_TIM_SET_COUNTER(&htim2, 0);
   //testAll();
 
-  void HAL_SYSTICK_Callback(void)
-  {
-      KBD_Tick1ms();   // wird alle 1 ms vom SysTick aufgerufen
-  }
+
   /* USER CODE END 2 */
 
   /* Infinite loop */
@@ -318,6 +321,9 @@ static void MX_GPIO_Init(void)
   /*Configure GPIO pin Output Level */
   HAL_GPIO_WritePin(GPIOA, LCD_RST_Pin|LCD_A0_Pin|LCD_CD_Pin, GPIO_PIN_RESET);
 
+  /*Configure GPIO pin Output Level */
+  HAL_GPIO_WritePin(GPIOB, Row1_Pin|Row2_Pin|Row3_Pin|Row4_Pin, GPIO_PIN_RESET);
+
   /*Configure GPIO pins : LCD_RST_Pin LCD_A0_Pin LCD_CD_Pin */
   GPIO_InitStruct.Pin = LCD_RST_Pin|LCD_A0_Pin|LCD_CD_Pin;
   GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
@@ -325,14 +331,19 @@ static void MX_GPIO_Init(void)
   GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
   HAL_GPIO_Init(GPIOA, &GPIO_InitStruct);
 
-  /*Configure GPIO pins : Rot_A_Pin Rot_S_Pin Rot_F_Pin Row1_Pin
-                           Row2_Pin Row3_Pin Row4_Pin Col1_Pin
+  /*Configure GPIO pins : Rot_A_Pin Rot_S_Pin Rot_F_Pin Col1_Pin
                            Col2_Pin Col3_Pin Col4_Pin */
-  GPIO_InitStruct.Pin = Rot_A_Pin|Rot_S_Pin|Rot_F_Pin|Row1_Pin
-                          |Row2_Pin|Row3_Pin|Row4_Pin|Col1_Pin
+  GPIO_InitStruct.Pin = Rot_A_Pin|Rot_S_Pin|Rot_F_Pin|Col1_Pin
                           |Col2_Pin|Col3_Pin|Col4_Pin;
   GPIO_InitStruct.Mode = GPIO_MODE_INPUT;
   GPIO_InitStruct.Pull = GPIO_PULLUP;
+  HAL_GPIO_Init(GPIOB, &GPIO_InitStruct);
+
+  /*Configure GPIO pins : Row1_Pin Row2_Pin Row3_Pin Row4_Pin */
+  GPIO_InitStruct.Pin = Row1_Pin|Row2_Pin|Row3_Pin|Row4_Pin;
+  GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_OD;
+  GPIO_InitStruct.Pull = GPIO_NOPULL;
+  GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
   HAL_GPIO_Init(GPIOB, &GPIO_InitStruct);
 
   /*Configure GPIO pins : Rot_X_Pin Rot_Y_Pin Rot_Z_Pin */
@@ -348,6 +359,11 @@ static void MX_GPIO_Init(void)
 
 /* USER CODE BEGIN 4 */
 
+
+void HAL_SYSTICK_Callback(void)
+{
+  KBD_Tick1ms();              // 1x/ms: Matrix-Scan + Entprellung
+}
 /* USER CODE END 4 */
 
 /**

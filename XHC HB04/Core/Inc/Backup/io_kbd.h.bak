@@ -12,31 +12,32 @@
 #pragma once
 #include <stdint.h>
 #include "stm32f1xx_hal.h"
-#include "main.h"
 
 /* --- Pins (CubeMX so konfigurieren):
  * ROWx: Open-Drain Output, initial HIGH (Hi-Z)
  * COLx: Input Pull-Up
  * Default: PB12..PB15 (ROW), PB5..PB8 (COL) – anpassbar via -D defines
 */
-#ifndef KBD_ROW1_Pin
-  #define KBD_ROW1_Pin        Row1_Pin
-  #define KBD_ROW1_GPIO_Port  Row1_GPIO_Port
-  #define KBD_ROW2_Pin        Row2_Pin
-  #define KBD_ROW2_GPIO_Port  Row2_GPIO_Port
-  #define KBD_ROW3_Pin        Row3_Pin
-  #define KBD_ROW3_GPIO_Port  Row3_GPIO_Port
-  #define KBD_ROW4_Pin        Row4_Pin
-  #define KBD_ROW4_GPIO_Port  Row4_GPIO_Port
+#ifndef KBD_ROW1_GPIO_Port
+ #define KBD_ROW1_GPIO_Port GPIOB
+ #define KBD_ROW1_Pin       GPIO_PIN_12
+ #define KBD_ROW2_GPIO_Port GPIOB
+ #define KBD_ROW2_Pin       GPIO_PIN_13
+ #define KBD_ROW3_GPIO_Port GPIOB
+ #define KBD_ROW3_Pin       GPIO_PIN_14
+ #define KBD_ROW4_GPIO_Port GPIOB
+ #define KBD_ROW4_Pin       GPIO_PIN_15
+#endif
 
-  #define KBD_COL1_Pin        Col1_Pin
-  #define KBD_COL1_GPIO_Port  Col1_GPIO_Port
-  #define KBD_COL2_Pin        Col2_Pin
-  #define KBD_COL2_GPIO_Port  Col2_GPIO_Port
-  #define KBD_COL3_Pin        Col3_Pin
-  #define KBD_COL3_GPIO_Port  Col3_GPIO_Port
-  #define KBD_COL4_Pin        Col4_Pin
-  #define KBD_COL4_GPIO_Port  Col4_GPIO_Port
+#ifndef KBD_COL1_GPIO_Port
+ #define KBD_COL1_GPIO_Port GPIOB
+ #define KBD_COL1_Pin       GPIO_PIN_5
+ #define KBD_COL2_GPIO_Port GPIOB
+ #define KBD_COL2_Pin       GPIO_PIN_6
+ #define KBD_COL3_GPIO_Port GPIOB
+ #define KBD_COL3_Pin       GPIO_PIN_7
+ #define KBD_COL4_GPIO_Port GPIOB
+ #define KBD_COL4_Pin       GPIO_PIN_8
 #endif
 
 /* Entprellzeit (ms) */

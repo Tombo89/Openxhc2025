@@ -4,28 +4,28 @@
 /* Row/Col Helfer */
 static inline void row_hi(uint8_t r){
   switch(r){
-  case 0: HAL_GPIO_WritePin(KBD_ROW1_GPIO_Port, KBD_ROW1_Pin, GPIO_PIN_SET); break;
-  case 1: HAL_GPIO_WritePin(KBD_ROW2_GPIO_Port, KBD_ROW2_Pin, GPIO_PIN_SET); break;
-  case 2: HAL_GPIO_WritePin(KBD_ROW3_GPIO_Port, KBD_ROW3_Pin, GPIO_PIN_SET); break;
-  case 3: HAL_GPIO_WritePin(KBD_ROW4_GPIO_Port, KBD_ROW4_Pin, GPIO_PIN_SET); break;
+    case 0: HAL_GPIO_WritePin(KBD_ROW1_GPIO_Port, KBD_ROW1_Pin, GPIO_PIN_SET); break;
+    case 1: HAL_GPIO_WritePin(KBD_ROW2_GPIO_Port, KBD_ROW2_Pin, GPIO_PIN_SET); break;
+    case 2: HAL_GPIO_WritePin(KBD_ROW3_GPIO_Port, KBD_ROW3_Pin, GPIO_PIN_SET); break;
+    case 3: HAL_GPIO_WritePin(KBD_ROW4_GPIO_Port, KBD_ROW4_Pin, GPIO_PIN_SET); break;
   }
 }
 static inline void row_lo(uint8_t r){
   switch(r){
-  case 0: HAL_GPIO_WritePin(KBD_ROW1_GPIO_Port, KBD_ROW1_Pin, GPIO_PIN_RESET); break;
-  case 1: HAL_GPIO_WritePin(KBD_ROW2_GPIO_Port, KBD_ROW2_Pin, GPIO_PIN_RESET); break;
-  case 2: HAL_GPIO_WritePin(KBD_ROW3_GPIO_Port, KBD_ROW3_Pin, GPIO_PIN_RESET); break;
-  case 3: HAL_GPIO_WritePin(KBD_ROW4_GPIO_Port, KBD_ROW4_Pin, GPIO_PIN_RESET); break;
+    case 0: HAL_GPIO_WritePin(KBD_ROW1_GPIO_Port, KBD_ROW1_Pin, GPIO_PIN_RESET); break;
+    case 1: HAL_GPIO_WritePin(KBD_ROW2_GPIO_Port, KBD_ROW2_Pin, GPIO_PIN_RESET); break;
+    case 2: HAL_GPIO_WritePin(KBD_ROW3_GPIO_Port, KBD_ROW3_Pin, GPIO_PIN_RESET); break;
+    case 3: HAL_GPIO_WritePin(KBD_ROW4_GPIO_Port, KBD_ROW4_Pin, GPIO_PIN_RESET); break;
   }
 }
 static inline uint8_t col_active(uint8_t c){ // aktiv LOW (PU)
   switch(c){
-  case 0: return HAL_GPIO_ReadPin(KBD_COL1_GPIO_Port, KBD_COL1_Pin) == GPIO_PIN_RESET;
-  case 1: return HAL_GPIO_ReadPin(KBD_COL2_GPIO_Port, KBD_COL2_Pin) == GPIO_PIN_RESET;
-  case 2: return HAL_GPIO_ReadPin(KBD_COL3_GPIO_Port, KBD_COL3_Pin) == GPIO_PIN_RESET;
-  case 3: return HAL_GPIO_ReadPin(KBD_COL4_GPIO_Port, KBD_COL4_Pin) == GPIO_PIN_RESET;
-  default: return 0;
+    case 0: return HAL_GPIO_ReadPin(KBD_COL1_GPIO_Port, KBD_COL1_Pin) == GPIO_PIN_RESET;
+    case 1: return HAL_GPIO_ReadPin(KBD_COL2_GPIO_Port, KBD_COL2_Pin) == GPIO_PIN_RESET;
+    case 2: return HAL_GPIO_ReadPin(KBD_COL3_GPIO_Port, KBD_COL3_Pin) == GPIO_PIN_RESET;
+    case 3: return HAL_GPIO_ReadPin(KBD_COL4_GPIO_Port, KBD_COL4_Pin) == GPIO_PIN_RESET;
   }
+  return 0;
 }
 
 /* Matrix-Mapping (vertikal gespiegelt wie im Altcode) */
