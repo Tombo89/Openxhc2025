@@ -144,6 +144,11 @@ int main(void)
   HAL_TIM_Encoder_Start(&htim2, TIM_CHANNEL_ALL);
   __HAL_TIM_SET_COUNTER(&htim2, 0);
   //testAll();
+
+  void HAL_SYSTICK_Callback(void)
+  {
+      KBD_Tick1ms();   // wird alle 1 ms vom SysTick aufgerufen
+  }
   /* USER CODE END 2 */
 
   /* Infinite loop */

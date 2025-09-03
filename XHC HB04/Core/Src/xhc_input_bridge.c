@@ -30,10 +30,18 @@ static uint8_t pkt[6];
 
 static volatile int16_t s_pending_detents = 0;
 static volatile uint8_t s_day = 0;
+static volatile int32_t s_wheel_pending = 0;  // sammelt Detents bis zum erfolgreichen Send
+static int16_t s_wheel_accum = 0;   // sammelt Detents bis zum erfolgreichen Send
 
 /* Du liest Buttons später? Für jetzt 0 lassen. */
 static inline void read_buttons(uint8_t* b1, uint8_t* b2){
     *b1 = 0x00; *b2 = 0x00;
+}
+
+static inline int8_t sat_s8(int32_t v) {
+    if (v > 127) return 127;
+    if (v < -128) return -128;
+    return (int8_t)v;
 }
 
 void XHC_InputBridge_Init(void){
@@ -51,30 +59,48 @@ static inline int8_t clamp_i8(int32_t v, int32_t lim){
     return (int8_t)v;
 }
 
+
 void XHC_InputBridge_Tick(void)
 {
-    if (hUsbDeviceFS.dev_state != USBD_STATE_CONFIGURED) return;
+    /* 1) Encoder-Rastungen einsammeln */
+    int16_t d = IOInputs_EncoderReadDetents();   /* ±N pro Aufruf */
+    if (d){
+        int32_t acc = (int32_t)s_pending_detents + d;
+        if (acc >  32767) acc =  32767;
+        if (acc < -32768) acc = -32768;
+        s_pending_detents = (int16_t)acc;
+    }
 
-    // --- Buttons lesen (NEU) ---
-    uint8_t b1=0, b2=0;
-    KBD_Read(&b1, &b2);          // max. zwei Codes, sonst 0
+    if (s_pending_detents == 0) return;
 
-    // --- Rotary + Encoder ---
-    uint8_t wheel_mode = IOInputs_RotaryReadCode();  // 0x11/0x12/...
-    int16_t det = IOInputs_EncoderReadDetents();         // -/+ Rastungen seit letztem Aufruf
-    if (det > 127) det = 127;
-    if (det < -128) det = -128;
+    /* 2) Rotary-Mode ermitteln (0=OFF, sonst 0x11..0x18) */
+    uint8_t rot = IOInputs_RotaryReadCode();
+#if IGNORE_WHEN_OFF
+    if (rot == 0) return;       /* Achse abgewählt → nichts senden */
+#endif
 
-    // --- Paket füllen ---
-    pkt[0] = 0x04;               // Report ID
-    pkt[1] = b1;                 // btn_1
-    pkt[2] = b2;                 // btn_2
-    pkt[3] = wheel_mode;         // wheel_mode
-    pkt[4] = (uint8_t)(int8_t)det; // wheel (signed)
-    pkt[5] = (uint8_t)(s_day ^ b1); // xor_day (s_day vorher via SetDay aktualisieren)
+    /* 3) USB-Kanal frei? (sonst BUSY → Report würde verworfen) */
+    USBD_CUSTOM_HID_HandleTypeDef *hhid =
+        (USBD_CUSTOM_HID_HandleTypeDef*)hUsbDeviceFS.pClassData;
+    if (!hhid || hhid->state != CUSTOM_HID_IDLE) return;
 
-    // --- Senden (nur wenn vorheriger Transfer fertig) ---
-    if (USBD_CUSTOM_HID_SendReport(&hUsbDeviceFS, pkt, sizeof(pkt)) == USBD_OK) {
-        // ok
+    /* 4) Buttons (falls vorhanden) + Δ begrenzen */
+    uint8_t btn1, btn2;
+    KBD_Fetch(&btn1, &btn2);
+    int8_t burst = clamp_i8(s_pending_detents, MAX_DETENTS_PER_RPT);
+
+    /* 5) Report 0x04 füllen (genau 6 Bytes) */
+    uint8_t rpt[XHC_RPT_IN_LEN];
+    rpt[POS_ID]        = XHC_RPT_IN_ID;
+    rpt[POS_BTN1]      = btn1;
+    rpt[POS_BTN2]      = btn2;
+    rpt[POS_WHEELMODE] = rot;
+    rpt[POS_WHEEL]     = (uint8_t)burst;     /* signed cast gewollt */
+    rpt[POS_XORDAY]    = (uint8_t)(s_day ^ btn1);   /* !!! wie im Altcode !!! */
+
+    /* 6) Abschicken */
+    if (USBD_CUSTOM_HID_SendReport(&hUsbDeviceFS, rpt, sizeof(rpt)) == USBD_OK){
+        s_pending_detents -= burst;  /* nur abbuchen, wenn wirklich unterwegs */
+        /* hhid->state wird im Stack auf BUSY gesetzt bis IN-Transfer fertig ist */
     }
 }
