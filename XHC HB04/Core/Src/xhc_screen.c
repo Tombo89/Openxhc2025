@@ -109,9 +109,8 @@ static uint8_t s_static_drawn = 0;
 #define BAR_MIN_PERIOD_MS  40u
 
 /* POS-Text links oben im blauen Balken */
-#define POS_X      2u
-#define POS_Y      (s_blue_y + 2u)
-
+#define POS_TXT_X   2u
+#define POS_TXT_Y   (s_blue_y + 2u)
 /* OFF erst anzeigen, wenn der Schalter so lange wirklich "offen" ist */
 #define ROT_OFF_DELAY_MS   120u
 
@@ -192,17 +191,17 @@ static void DrawPOS(const char* txt)
     for (uint8_t i=0; i<common; ++i) {
         if (txt[i] != s_pos_last[i]) {
             char s[2] = { txt[i], 0 };
-            ST7735_WriteString((uint16_t)(POS_X + i*CHAR_W), POS_Y, s, Font_7x10, WHITE, BLUE);
+            ST7735_WriteString((uint16_t)(POS_TXT_X + i*CHAR_W), POS_TXT_Y, s, Font_7x10, WHITE, BLUE);
         }
     }
     /* zusätzliche neue Zeichen */
     for (uint8_t i=common; i<len; ++i) {
         char s[2] = { txt[i], 0 };
-        ST7735_WriteString((uint16_t)(POS_X + i*CHAR_W), POS_Y, s, Font_7x10, WHITE, BLUE);
+        ST7735_WriteString((uint16_t)(POS_TXT_X + i*CHAR_W), POS_TXT_Y, s, Font_7x10, WHITE, BLUE);
     }
     /* überhängende alte löschen */
     for (uint8_t i=len; i<oldlen; ++i) {
-        fillRect((uint16_t)(POS_X + i*CHAR_W), POS_Y, CHAR_W, LINE_H, BLUE);
+        fillRect((uint16_t)(POS_TXT_X + i*CHAR_W), POS_TXT_Y, CHAR_W, LINE_H, BLUE);
     }
 
     memcpy(s_pos_last, txt, len);
